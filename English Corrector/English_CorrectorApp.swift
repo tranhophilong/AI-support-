@@ -6,12 +6,33 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct English_CorrectorApp: App {
+
+    let container: ModelContainer
+
+    init() {
+        do {
+            let config = ModelConfiguration(isStoredInMemoryOnly: false)
+            container = try ModelContainer(for: ConversationModel.self, MessageModel.self, SavedNoteModel.self, configurations: config)
+
+            // Print database location for debugging
+            if let url = container.configurations.first?.url {
+                print("DEBUG: Database URL: \(url.path)")
+            }
+        } catch {
+            print("SwiftData Error:", error)
+            dump(error)
+            fatalError("Could not initialize ModelContainer: \(error)")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ListConversationScreen()
         }
+        .modelContainer(container)
     }
 }

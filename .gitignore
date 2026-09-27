@@ -1,0 +1,6 @@
+*.png
+English Corrector/GeminiConfig.plist
+English Corrector/GroqConfig.plist
+*.xcuserstate
+English Corrector.xcodeproj/project.xcworkspace/xcuserdata/
+English Corrector.xcodeproj/xcuserdata/*/xcdebugger/
