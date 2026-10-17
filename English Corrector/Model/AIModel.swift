@@ -153,3 +153,16 @@ struct ChatMessage: Identifiable {
 
     let correction: AICorrectionResponse?
 }
+
+// MARK: - AI Vocabulary Lookup Response
+
+struct AIVocabularyLookupResponse: Codable, Equatable {
+    let word: String
+    let phonetic: String
+    let partOfSpeech: String
+    let vietnameseMeaning: String
+    let englishDefinition: String
+    let exampleSentence: String
+    let synonyms: [String]
+}
+

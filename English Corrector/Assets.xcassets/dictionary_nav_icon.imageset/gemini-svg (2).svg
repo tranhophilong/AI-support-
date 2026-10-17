@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" fill="none">
+  <!-- Book Spine / Back Cover -->
+  <path d="M8 8C8 6.89543 8.89543 6 10 6H34C35.1046 6 36 6.89543 36 8V38C36 39.1046 35.1046 40 34 40H10C8.89543 40 8 39.1046 8 38V8Z" fill="#1E3A8A" />
+  
+  <!-- Pages Thickness -->
+  <path d="M34 9H38V37H34V9Z" fill="#FEF3C7" />
+  
+  <!-- Book Cover Front -->
+  <rect x="11" y="6" width="24" height="34" rx="3" fill="#1D4ED8" />
+  <rect x="8" y="6" width="5" height="34" rx="2" fill="#0F172A" />
+  
+  <!-- Book Title Text (A-Z) -->
+  <text x="16" y="22" font-family="system-ui, sans-serif" font-weight="900" font-size="9" fill="#FFFFFF" letter-spacing="0.5">A-Z</text>
+  <text x="16" y="32" font-family="system-ui, sans-serif" font-weight="700" font-size="6" fill="#93C5FD">DICT</text>
+  
+  <!-- Magnifying Glass -->
+  <g transform="translate(4, -2)">
+    <circle cx="34" cy="18" r="7" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2.5" />
+    <circle cx="34" cy="18" r="4.5" fill="#DBEAFE" />
+    <rect x="38.5" y="22.5" width="3" height="8" rx="1.5" transform="rotate(-45 38.5 22.5)" fill="#1E293B" />
+  </g>
+  
+  <!-- Bookmark Ribbon -->
+  <path d="M28 6V11L30.5 9.5L33 11V6H28Z" fill="#EF4444" />
+</svg>

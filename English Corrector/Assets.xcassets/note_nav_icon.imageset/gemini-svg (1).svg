@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" fill="none">
+  <!-- Base Shadow / Under-layer -->
+  <rect x="12" y="10" width="26" height="32" rx="4" fill="#C7D2FE" />
+  
+  <!-- Main Notepad Sheet -->
+  <rect x="10" y="8" width="26" height="32" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2" />
+  
+  <!-- Spiral Bindings -->
+  <rect x="13" y="5" width="3" height="6" rx="1.5" fill="#0D9488" />
+  <rect x="19" y="5" width="3" height="6" rx="1.5" fill="#0D9488" />
+  <rect x="25" y="5" width="3" height="6" rx="1.5" fill="#0D9488" />
+  <rect x="31" y="5" width="3" height="6" rx="1.5" fill="#0D9488" />
+  
+  <!-- Note Lines -->
+  <rect x="15" y="16" width="16" height="2.5" rx="1.25" fill="#94A3B8" />
+  <rect x="15" y="22" width="12" height="2.5" rx="1.25" fill="#CBD5E1" />
+  <rect x="15" y="28" width="8" height="2.5" rx="1.25" fill="#CBD5E1" />
+  
+  <!-- Floating Pencil -->
+  <g transform="rotate(25 34 26)">
+    <rect x="33" y="14" width="5" height="18" rx="2" fill="#F59E0B" />
+    <path d="M33 32L35.5 37L38 32H33Z" fill="#F97316" />
+    <path d="M34.5 35L35.5 37L36.5 35H34.5Z" fill="#1E293B" />
+    <rect x="33" y="14" width="5" height="3" fill="#EF4444" />
+  </g>
+</svg>

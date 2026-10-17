@@ -16,7 +16,13 @@ struct English_CorrectorApp: App {
     init() {
         do {
             let config = ModelConfiguration(isStoredInMemoryOnly: false)
-            container = try ModelContainer(for: ConversationModel.self, MessageModel.self, SavedNoteModel.self, configurations: config)
+            container = try ModelContainer(
+                for: ConversationModel.self,
+                MessageModel.self,
+                SavedNoteModel.self,
+                VocabularyNoteModel.self,
+                configurations: config
+            )
 
             // Print database location for debugging
             if let url = container.configurations.first?.url {
@@ -31,7 +37,7 @@ struct English_CorrectorApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ListConversationScreen()
+            RootTabView()
         }
         .modelContainer(container)
     }

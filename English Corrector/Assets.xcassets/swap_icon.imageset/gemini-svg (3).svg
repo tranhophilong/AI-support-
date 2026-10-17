@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" fill="none">
+  <!-- Mũi tên cong phía trên (Xanh dương) -->
+  <path d="M14 22C14 16.4772 18.4772 12 24 12C28.4183 12 32.1895 14.8617 33.4868 18.8471" stroke="#2563EB" stroke-width="5" stroke-linecap="round" />
+  <!-- Đầu mũi tên trên -->
+  <path d="M30 20L36 20L36 14" stroke="#2563EB" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Mũi tên cong phía dưới (Cam rực rỡ) -->
+  <path d="M34 26C34 31.5228 29.5228 36 24 36C19.5817 36 15.8105 33.1383 14.5132 29.1529" stroke="#F97316" stroke-width="5" stroke-linecap="round" />
+  <!-- Đầu mũi tên dưới -->
+  <path d="M18 28L12 28L12 34" stroke="#F97316" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Tia phát sáng trang trí nhỏ -->
+  <circle cx="8" cy="18" r="1.5" fill="#FBBF24" />
+  <circle cx="40" cy="30" r="1.5" fill="#60A5FA" />
+</svg>

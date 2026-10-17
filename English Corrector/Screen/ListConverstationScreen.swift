@@ -15,10 +15,15 @@ struct ListConversationScreen: View {
     @Query(sort: \ConversationModel.createdAt, order: .reverse) private var conversations: [ConversationModel]
 
     @AppStorage("hasSeenWidgetOnboarding") private var hasSeenWidgetOnboarding = false
+    @AppStorage("appThemeMode") private var appThemeModeRawValue = AppThemeMode.light.rawValue
 
     @State private var path = NavigationPath()
     @State private var showWidgetOnboarding = false
     @State private var showNotedAIScreen = false
+
+    private var appThemeMode: AppThemeMode {
+        AppThemeMode(rawValue: appThemeModeRawValue) ?? .light
+    }
 
     var body: some View {
 
@@ -120,15 +125,27 @@ struct ListConversationScreen: View {
             }
             .navigationTitle("Conversations")
             .toolbarBackground(AppTheme.Surface.appBackground, for: .navigationBar)
-            .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
-
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        NotedAIScreen()
+                    Menu {
+                        ForEach(AppThemeMode.allCases) { mode in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    appThemeModeRawValue = mode.rawValue
+                                }
+                            } label: {
+                                Label(
+                                    mode.title,
+                                    systemImage: appThemeMode == mode
+                                    ? "checkmark.circle.fill"
+                                    : mode.icon
+                                )
+                            }
+                        }
                     } label: {
-                        Image(systemName: "note.text")
-                            .foregroundStyle(AppTheme.Accent.a600)
+                        Image(systemName: appThemeMode.icon)
+                            .foregroundStyle(appThemeMode == .dark ? AppTheme.Highlight.h600 : AppTheme.Primary.p700)
+                            .accessibilityLabel("Theme: \(appThemeMode.title)")
                     }
                 }
 
@@ -369,11 +386,11 @@ struct ConversationCard: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppTheme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .stroke(AppTheme.Surface.border, lineWidth: 1)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(
             color: AppTheme.Shadow.card,
             radius: 12,

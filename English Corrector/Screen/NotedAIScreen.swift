@@ -220,7 +220,6 @@ struct NotedAIScreen: View {
         .navigationTitle("Noted AI")
         .background(AppTheme.Surface.appBackground)
         .toolbarBackground(AppTheme.Surface.appBackground, for: .navigationBar)
-        .toolbarColorScheme(.light, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
