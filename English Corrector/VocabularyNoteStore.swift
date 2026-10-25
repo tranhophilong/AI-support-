@@ -86,6 +86,9 @@ final class VocabularyNoteStore {
             existing.englishDefinition = lookup.englishDefinition
             existing.exampleSentence = lookup.exampleSentence
             existing.synonyms = lookup.synonyms
+            if let chatTopics = lookup.chatTopics, !chatTopics.isEmpty {
+                existing.chatTopics = chatTopics
+            }
             if let sourceText, !sourceText.isEmpty, existing.sourceText.isEmpty {
                 existing.sourceText = sourceText
             }
@@ -108,10 +111,12 @@ final class VocabularyNoteStore {
             vietnameseMeaning: lookup.vietnameseMeaning,
             englishDefinition: lookup.englishDefinition,
             exampleSentence: lookup.exampleSentence,
-            synonyms: lookup.synonyms
+            synonyms: lookup.synonyms,
+            chatTopics: lookup.chatTopics
         )
         context.insert(note)
         try context.save()
         return note
     }
+
 }

@@ -42,6 +42,8 @@ class MessageModel {
     var natural: String?
     var explanations: [String]?
     var explanationNoted: [String]?
+    var followUpQuestion: String?
+    var suggestedReplies: [String]?
 
     init(
         text: String,
@@ -49,7 +51,9 @@ class MessageModel {
         fixed: String? = nil,
         natural: String? = nil,
         explanations: [String]? = nil,
-        explanationNoted: [String]? = nil
+        explanationNoted: [String]? = nil,
+        followUpQuestion: String? = nil,
+        suggestedReplies: [String]? = nil
     ) {
         self.text = text
         self.isUser = isUser
@@ -57,6 +61,8 @@ class MessageModel {
         self.natural = natural
         self.explanations = explanations
         self.explanationNoted = explanationNoted
+        self.followUpQuestion = followUpQuestion
+        self.suggestedReplies = suggestedReplies
     }
 }
 
@@ -100,6 +106,7 @@ class VocabularyNoteModel {
     var englishDefinition: String?
     var exampleSentence: String?
     var synonyms: [String]?
+    var chatTopicsJSON: String?
 
     init(
         word: String,
@@ -111,7 +118,8 @@ class VocabularyNoteModel {
         vietnameseMeaning: String? = nil,
         englishDefinition: String? = nil,
         exampleSentence: String? = nil,
-        synonyms: [String]? = nil
+        synonyms: [String]? = nil,
+        chatTopics: [VocabularyChatTopicSuggestion]? = nil
     ) {
         self.word = word
         self.normalizedWord = word.normalizedVocabularyWord
@@ -124,6 +132,30 @@ class VocabularyNoteModel {
         self.englishDefinition = englishDefinition
         self.exampleSentence = exampleSentence
         self.synonyms = synonyms
+        if let chatTopics,
+           let data = try? JSONEncoder().encode(chatTopics),
+           let json = String(data: data, encoding: .utf8) {
+            self.chatTopicsJSON = json
+        }
+    }
+
+    var chatTopics: [VocabularyChatTopicSuggestion] {
+        get {
+            guard let chatTopicsJSON,
+                  let data = chatTopicsJSON.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([VocabularyChatTopicSuggestion].self, from: data) else {
+                return []
+            }
+            return decoded
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let json = String(data: data, encoding: .utf8) {
+                chatTopicsJSON = json
+            } else {
+                chatTopicsJSON = nil
+            }
+        }
     }
 
     var hasLookupResult: Bool {
@@ -145,10 +177,12 @@ class VocabularyNoteModel {
             vietnameseMeaning: vietnameseMeaning,
             englishDefinition: englishDefinition ?? "",
             exampleSentence: exampleSentence ?? "",
-            synonyms: synonyms ?? []
+            synonyms: synonyms ?? [],
+            chatTopics: chatTopics
         )
     }
 }
+
 
 extension String {
     var normalizedVocabularyWord: String {

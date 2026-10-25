@@ -122,14 +122,23 @@ struct NotedAIScreen: View {
 
                             // Context / Correct Sentence
                             if !note.originalContext.isEmpty && note.isExplanation {
-                                Text(note.originalContext)
-                                    .font(.caption)
-                                    .italic()
-                                    .foregroundStyle(AppTheme.Neutral.n500)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(AppTheme.Surface.cardMuted)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                HStack(spacing: 8) {
+                                    Text(note.originalContext)
+                                        .font(.caption)
+                                        .italic()
+                                        .foregroundStyle(AppTheme.Neutral.n500)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    SpeakButton(
+                                        text: note.originalContext,
+                                        font: .caption,
+                                        activeColor: AppTheme.Primary.p500
+                                    )
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(AppTheme.Surface.cardMuted)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
 
                             HStack(spacing: 12) {
@@ -140,6 +149,13 @@ struct NotedAIScreen: View {
                                     .padding(.vertical, 2)
                                     .background(note.isExplanation ? AppTheme.Accent.a100 : AppTheme.Secondary.s100)
                                     .clipShape(Capsule())
+
+                                SpeakButton(
+                                    text: note.text,
+                                    font: .caption.weight(.semibold),
+                                    activeColor: AppTheme.Primary.p500,
+                                    showBackground: true
+                                )
 
                                 // PER-NOTE NOTIFICATION SETTING
                                 Menu {
@@ -339,6 +355,9 @@ struct NotedAIScreen: View {
             Task {
                 await NotificationManager.shared.requestAuthorization()
             }
+        }
+        .onDisappear {
+            SpeechSynthesizerManager.shared.stop()
         }
     }
 

@@ -393,11 +393,14 @@
 				GROQ_API_KEY = "";
 				INFOPLIST_KEY_GEMINI_API_KEY = "$(GEMINI_API_KEY)";
 				INFOPLIST_KEY_GROQ_API_KEY = "$(GROQ_API_KEY)";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Allow microphone access so you can practice speaking English and dictate messages.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Allow speech recognition to convert your spoken English into text in real time.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -427,11 +430,14 @@
 				GROQ_API_KEY = "";
 				INFOPLIST_KEY_GEMINI_API_KEY = "$(GEMINI_API_KEY)";
 				INFOPLIST_KEY_GROQ_API_KEY = "$(GROQ_API_KEY)";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Allow microphone access so you can practice speaking English and dictate messages.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Allow speech recognition to convert your spoken English into text in real time.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

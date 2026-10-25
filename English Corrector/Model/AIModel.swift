@@ -119,6 +119,10 @@ struct AICorrectionResponse: Codable {
     let natural: String
     let explanations: [ExplanationItem]
     let corrections: [Correction]?
+    let followUpQuestion: String?
+    let suggestedReplies: [String]?
+    let conversationTitle: String?
+    let updatedContext: String?
 }
 
 struct ExplanationItem: Codable {
@@ -156,6 +160,14 @@ struct ChatMessage: Identifiable {
 
 // MARK: - AI Vocabulary Lookup Response
 
+struct VocabularyChatTopicSuggestion: Codable, Equatable, Hashable, Identifiable {
+    var id: String { title }
+    let title: String
+    let contextDescription: String
+    let starterQuestion: String
+    let sampleReplies: [String]
+}
+
 struct AIVocabularyLookupResponse: Codable, Equatable {
     let word: String
     let phonetic: String
@@ -164,5 +176,14 @@ struct AIVocabularyLookupResponse: Codable, Equatable {
     let englishDefinition: String
     let exampleSentence: String
     let synonyms: [String]
+    let chatTopics: [VocabularyChatTopicSuggestion]?
 }
+
+// MARK: - AI Next-Word Suggestion Response
+
+struct AINextWordSuggestionResponse: Codable, Equatable {
+    let suggestions: [String]
+}
+
+
 

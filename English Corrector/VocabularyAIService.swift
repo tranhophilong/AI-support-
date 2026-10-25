@@ -61,6 +61,11 @@ struct VocabularyLookupPrompt {
         - "englishDefinition": short, easy-to-understand English definition
         - "exampleSentence": one natural English example sentence using the word
         - "synonyms": 3 to 6 common English synonyms
+        - "chatTopics": 2 to 3 engaging daily conversation topics related to the word so the user can practice using it in a real chat. Each topic must include:
+          1. "title": short topic title (3 to 6 words)
+          2. "contextDescription": 1 to 2 sentences describing the conversation scenario and instructing the AI coach to help the user practice using the word naturally
+          3. "starterQuestion": a friendly opening question in English from the coach that invites the user to reply using the word
+          4. "sampleReplies": 2 to 3 natural English reply sentences that answer the starterQuestion and actively use the target word
         """
 
         let trimmedContext = context?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -182,7 +187,8 @@ final class GeminiVocabularyAIProvider: VocabularyLookupAIProvider {
             "vietnameseMeaning",
             "englishDefinition",
             "exampleSentence",
-            "synonyms"
+            "synonyms",
+            "chatTopics"
         ],
         properties: [
             "word": GeminiSchemaProperty(
@@ -212,6 +218,33 @@ final class GeminiVocabularyAIProvider: VocabularyLookupAIProvider {
             "synonyms": GeminiSchemaProperty(
                 type: "array",
                 items: GeminiSchemaProperty(type: "string")
+            ),
+            "chatTopics": GeminiSchemaProperty(
+                type: "array",
+                description: "2 to 3 conversation topics to practice using the vocabulary word.",
+                items: GeminiSchemaProperty(
+                    type: "object",
+                    properties: [
+                        "title": GeminiSchemaProperty(
+                            type: "string",
+                            description: "Short 3 to 6 word conversation topic title."
+                        ),
+                        "contextDescription": GeminiSchemaProperty(
+                            type: "string",
+                            description: "1 to 2 sentence AI context describing the conversation topic and target vocabulary word."
+                        ),
+                        "starterQuestion": GeminiSchemaProperty(
+                            type: "string",
+                            description: "A friendly opening question from the coach related to the topic."
+                        ),
+                        "sampleReplies": GeminiSchemaProperty(
+                            type: "array",
+                            description: "2 to 3 natural English replies that answer the starterQuestion using the target vocabulary word.",
+                            items: GeminiSchemaProperty(type: "string")
+                        )
+                    ],
+                    required: ["title", "contextDescription", "starterQuestion", "sampleReplies"]
+                )
             )
         ]
     )
@@ -315,10 +348,23 @@ final class GroqVocabularyAIProvider: VocabularyLookupAIProvider {
       "vietnameseMeaning": "ví dụ, mẫu",
       "englishDefinition": "Something that illustrates a general rule or pattern.",
       "exampleSentence": "Can you give me an example of how to use this word?",
-      "synonyms": ["instance", "sample", "illustration", "case"]
+      "synonyms": ["instance", "sample", "illustration", "case"],
+      "chatTopics": [
+        {
+          "title": "Learning New Skills",
+          "contextDescription": "Practice casual English conversation about learning new skills and using the word 'example' naturally.",
+          "starterQuestion": "What is a skill you learned recently? Can you share an example of how you practice it?",
+          "sampleReplies": [
+            "For example, I practice speaking English every evening.",
+            "A good example is cooking, which I started learning last month.",
+            "My favorite example is learning to play guitar from online videos."
+          ]
+        }
+      ]
     }
     """
 }
+
 
 private extension AIVocabularyLookupResponse {
 

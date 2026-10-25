@@ -13,6 +13,13 @@ struct VocabularyLookupTarget: Identifiable, Equatable {
     let sourceConversationID: UUID?
 }
 
+struct VocabularyConversationDestination: Identifiable, Hashable {
+    let id = UUID()
+    let conversation: ConversationModel
+    let highlightedWord: String?
+    let highlightedSourceText: String?
+}
+
 struct VocabularyNotesScreen: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \VocabularyNoteModel.updatedAt, order: .reverse) private var words: [VocabularyNoteModel]
@@ -22,7 +29,7 @@ struct VocabularyNotesScreen: View {
 
     @State private var searchText = ""
     @State private var activeLookupTarget: VocabularyLookupTarget?
-    @State private var selectedConversation: ConversationModel?
+    @State private var selectedDestination: VocabularyConversationDestination?
 
     private var selectedAIModel: AIModelOption {
         AIModelOption(rawValue: selectedAIModelRawValue) ?? .groqGPTOSS20B
@@ -159,7 +166,11 @@ struct VocabularyNotesScreen: View {
                                     },
                                     onOpenConversation: conversation(for: item).map { conv in
                                         {
-                                            selectedConversation = conv
+                                            selectedDestination = VocabularyConversationDestination(
+                                                conversation: conv,
+                                                highlightedWord: item.word,
+                                                highlightedSourceText: item.sourceText
+                                            )
                                         }
                                     }
                                 )
@@ -207,8 +218,12 @@ struct VocabularyNotesScreen: View {
                     }
                 }
             }
-            .navigationDestination(item: $selectedConversation) { conversation in
-                ChatScreen(conversation: conversation)
+            .navigationDestination(item: $selectedDestination) { destination in
+                ChatScreen(
+                    conversation: destination.conversation,
+                    highlightedWord: destination.highlightedWord,
+                    highlightedSourceText: destination.highlightedSourceText
+                )
             }
             .sheet(item: $activeLookupTarget) { target in
                 VocabularyDetailSheet(
@@ -219,8 +234,22 @@ struct VocabularyNotesScreen: View {
                         if let conv = conversations.first(where: { $0.id == conversationID }) {
                             activeLookupTarget = nil
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                selectedConversation = conv
+                                selectedDestination = VocabularyConversationDestination(
+                                    conversation: conv,
+                                    highlightedWord: target.word,
+                                    highlightedSourceText: target.contextSentence
+                                )
                             }
+                        }
+                    },
+                    onStartTopicConversation: { newConversation in
+                        activeLookupTarget = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            selectedDestination = VocabularyConversationDestination(
+                                conversation: newConversation,
+                                highlightedWord: target.word,
+                                highlightedSourceText: nil
+                            )
                         }
                     }
                 )
@@ -229,6 +258,7 @@ struct VocabularyNotesScreen: View {
             }
         }
     }
+
 
     private func triggerSearchLookup() {
         guard !trimmedSearchText.isEmpty else { return }
@@ -277,6 +307,13 @@ private struct VocabularyRow: View {
                         .padding(.vertical, 6)
                         .background(AppTheme.Accent.a50)
                         .clipShape(Capsule())
+
+                    SpeakButton(
+                        text: item.word,
+                        font: .caption.weight(.semibold),
+                        activeColor: AppTheme.Primary.p500,
+                        showBackground: true
+                    )
 
                     if let partOfSpeech = item.partOfSpeech, !partOfSpeech.isEmpty {
                         Text(partOfSpeech)
@@ -339,7 +376,7 @@ private struct VocabularyRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                HStack {
+                HStack(spacing: 10) {
                     if let sourceConversationTitle = item.sourceConversationTitle,
                        !sourceConversationTitle.isEmpty,
                        let onOpenConversation {
@@ -358,6 +395,18 @@ private struct VocabularyRow: View {
                     }
 
                     Spacer()
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.caption2)
+                        Text(item.chatTopics.isEmpty ? "Gợi ý chat" : "Luyện chat (\(item.chatTopics.count))")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(AppTheme.Accent.a600)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppTheme.Accent.a50)
+                    .clipShape(Capsule())
 
                     Text(item.updatedAt, style: .date)
                         .font(.caption2.weight(.semibold))
@@ -385,10 +434,12 @@ private struct VocabularyDetailSheet: View {
     let savedWords: [VocabularyNoteModel]
     let selectedAIModel: AIModelOption
     let onOpenConversation: (UUID) -> Void
+    let onStartTopicConversation: (ConversationModel) -> Void
 
     @State private var currentWord: String = ""
     @State private var currentContext: String?
     @State private var wordHistory: [String] = []
+
 
     @State private var lookupResult: AIVocabularyLookupResponse?
     @State private var isLoading = false
@@ -408,10 +459,12 @@ private struct VocabularyDetailSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         // WORD HEADER CARD
+                        let spokenWord = lookupResult?.word.isEmpty == false ? lookupResult!.word : currentWord
+
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text(lookupResult?.word.isEmpty == false ? lookupResult!.word : currentWord)
+                                    Text(spokenWord)
                                         .font(.title2.bold())
                                         .foregroundStyle(AppTheme.Neutral.n900)
 
@@ -421,6 +474,22 @@ private struct VocabularyDetailSheet: View {
                                                 .font(.subheadline)
                                                 .foregroundStyle(AppTheme.Neutral.n500)
                                         }
+
+                                        SpeakButton(
+                                            text: spokenWord,
+                                            slow: false,
+                                            font: .subheadline.weight(.semibold),
+                                            activeColor: AppTheme.Primary.p500,
+                                            showBackground: true
+                                        )
+
+                                        SpeakButton(
+                                            text: spokenWord,
+                                            slow: true,
+                                            font: .subheadline.weight(.semibold),
+                                            activeColor: AppTheme.Accent.a600,
+                                            showBackground: true
+                                        )
 
                                         if let partOfSpeech = lookupResult?.partOfSpeech, !partOfSpeech.isEmpty {
                                             Text(partOfSpeech)
@@ -463,9 +532,19 @@ private struct VocabularyDetailSheet: View {
                                !contextText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                                contextText.normalizedVocabularyWord != currentWord.normalizedVocabularyWord {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Ngữ cảnh xuất hiện")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(AppTheme.Neutral.n500)
+                                    HStack {
+                                        Text("Ngữ cảnh xuất hiện")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(AppTheme.Neutral.n500)
+
+                                        Spacer()
+
+                                        SpeakButton(
+                                            text: contextText,
+                                            font: .caption,
+                                            activeColor: AppTheme.Primary.p500
+                                        )
+                                    }
 
                                     Text(contextText)
                                         .font(.caption)
@@ -545,9 +624,19 @@ private struct VocabularyDetailSheet: View {
                                     .overlay(AppTheme.Surface.border)
 
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Label("Giải thích tiếng Anh", systemImage: "text.alignleft")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(AppTheme.Secondary.s600)
+                                    HStack {
+                                        Label("Giải thích tiếng Anh", systemImage: "text.alignleft")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(AppTheme.Secondary.s600)
+
+                                        Spacer()
+
+                                        SpeakButton(
+                                            text: result.englishDefinition,
+                                            font: .caption,
+                                            activeColor: AppTheme.Secondary.s600
+                                        )
+                                    }
 
                                     Text(result.englishDefinition)
                                         .font(.subheadline)
@@ -560,9 +649,27 @@ private struct VocabularyDetailSheet: View {
                                         .overlay(AppTheme.Surface.border)
 
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Label("Ví dụ", systemImage: "quote.opening")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(AppTheme.Accent.a600)
+                                        HStack(spacing: 10) {
+                                            Label("Ví dụ", systemImage: "quote.opening")
+                                                .font(.caption.bold())
+                                                .foregroundStyle(AppTheme.Accent.a600)
+
+                                            Spacer()
+
+                                            SpeakButton(
+                                                text: result.exampleSentence,
+                                                slow: false,
+                                                font: .caption,
+                                                activeColor: AppTheme.Accent.a600
+                                            )
+
+                                            SpeakButton(
+                                                text: result.exampleSentence,
+                                                slow: true,
+                                                font: .caption,
+                                                activeColor: AppTheme.Accent.a600
+                                            )
+                                        }
 
                                         Text(result.exampleSentence)
                                             .font(.subheadline)
@@ -648,6 +755,10 @@ private struct VocabularyDetailSheet: View {
                                 }
                             }
 
+                            if let topics = result.chatTopics, !topics.isEmpty {
+                                chatTopicsCard(topics: topics, lookup: result)
+                            }
+
                             if let conversationID = initialTarget.sourceConversationID,
                                wordHistory.isEmpty {
                                 Button {
@@ -715,6 +826,122 @@ private struct VocabularyDetailSheet: View {
             currentContext = initialTarget.contextSentence
             performLookup(for: initialTarget.word, contextSentence: initialTarget.contextSentence, forceRefresh: false)
         }
+        .onDisappear {
+            SpeechSynthesizerManager.shared.stop()
+        }
+    }
+
+    private func chatTopicsCard(topics: [VocabularyChatTopicSuggestion], lookup: AIVocabularyLookupResponse) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Gợi ý chủ đề luyện Chat", systemImage: "bubble.left.and.bubble.right.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
+
+                Spacer()
+
+                Text("Bấm để bắt đầu chat")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Neutral.n500)
+            }
+
+            ForEach(topics) { topic in
+                Button {
+                    startTopicConversation(topic, lookup: lookup)
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top) {
+                            Text(topic.title)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.Neutral.n900)
+                                .multilineTextAlignment(.leading)
+
+                            Spacer()
+
+                            HStack(spacing: 4) {
+                                Text("Bắt đầu chat")
+                                    .font(.caption2.weight(.semibold))
+                                Image(systemName: "arrow.right.circle.fill")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(AppTheme.Primary.p500)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppTheme.Primary.p50)
+                            .clipShape(Capsule())
+                        }
+
+                        Text(topic.starterQuestion)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Neutral.n700)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let firstReply = topic.sampleReplies.first, !firstReply.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.Accent.a600)
+
+                                Text("Mẫu: \"\(firstReply)\"")
+                                    .font(.caption2)
+                                    .italic()
+                                    .foregroundStyle(AppTheme.Neutral.n500)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.Surface.cardMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+        }
+    }
+
+    private func startTopicConversation(_ topic: VocabularyChatTopicSuggestion, lookup: AIVocabularyLookupResponse) {
+        let newConversation = ConversationModel(
+            title: topic.title,
+            conversationDescription: topic.contextDescription
+        )
+        context.insert(newConversation)
+
+        let starterMessage = MessageModel(
+            text: topic.starterQuestion,
+            isUser: false,
+            followUpQuestion: topic.starterQuestion,
+            suggestedReplies: topic.sampleReplies
+        )
+        starterMessage.conversation = newConversation
+        context.insert(starterMessage)
+
+        do {
+            _ = try VocabularyNoteStore.saveLookupResult(
+                word: currentWord,
+                lookup: lookup,
+                sourceText: currentContext,
+                sourceConversation: newConversation,
+                in: context
+            )
+            try context.save()
+        } catch {
+            print("DEBUG: Failed to create vocabulary topic conversation: \(error)")
+        }
+
+        onStartTopicConversation(newConversation)
     }
 
     private func selectSynonym(_ synonym: String) {
@@ -754,7 +981,8 @@ private struct VocabularyDetailSheet: View {
 
         if !forceRefresh,
            let existing = savedWords.first(where: { $0.normalizedWord == word.normalizedVocabularyWord }),
-           let cached = existing.cachedLookupResponse {
+           let cached = existing.cachedLookupResponse,
+           !(cached.chatTopics ?? []).isEmpty {
             lookupResult = cached
             return
         }
@@ -790,6 +1018,7 @@ private struct VocabularyDetailSheet: View {
         }
     }
 }
+
 
 private struct VocabularyListRowStyle: ViewModifier {
     func body(content: Content) -> some View {
