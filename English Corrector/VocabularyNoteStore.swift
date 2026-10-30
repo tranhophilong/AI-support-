@@ -68,6 +68,7 @@ final class VocabularyNoteStore {
         lookup: AIVocabularyLookupResponse,
         sourceText: String? = nil,
         sourceConversation: ConversationModel? = nil,
+        imageURLs: [String]? = nil,
         in context: ModelContext
     ) throws -> VocabularyNoteModel? {
         let normalizedWord = word.normalizedVocabularyWord
@@ -88,6 +89,9 @@ final class VocabularyNoteStore {
             existing.synonyms = lookup.synonyms
             if let chatTopics = lookup.chatTopics, !chatTopics.isEmpty {
                 existing.chatTopics = chatTopics
+            }
+            if let imageURLs, !imageURLs.isEmpty {
+                existing.imageURLs = imageURLs
             }
             if let sourceText, !sourceText.isEmpty, existing.sourceText.isEmpty {
                 existing.sourceText = sourceText
@@ -112,7 +116,77 @@ final class VocabularyNoteStore {
             englishDefinition: lookup.englishDefinition,
             exampleSentence: lookup.exampleSentence,
             synonyms: lookup.synonyms,
-            chatTopics: lookup.chatTopics
+            chatTopics: lookup.chatTopics,
+            imageURLs: imageURLs
+        )
+        context.insert(note)
+        try context.save()
+        return note
+    }
+
+    static func updateImageURLs(
+        for word: String,
+        imageURLs: [String],
+        in context: ModelContext
+    ) {
+        let normalizedWord = word.normalizedVocabularyWord
+        guard !normalizedWord.isEmpty, !imageURLs.isEmpty else { return }
+
+        let descriptor = FetchDescriptor<VocabularyNoteModel>(
+            predicate: #Predicate { item in
+                item.normalizedWord == normalizedWord
+            }
+        )
+
+        if let existing = try? context.fetch(descriptor).first {
+            existing.imageURLs = imageURLs
+            try? context.save()
+        }
+    }
+
+    @discardableResult
+    static func saveQuickLookupResult(
+        word: String,
+        quickLookup: AIQuickWordLookupResponse,
+        sourceText: String,
+        in context: ModelContext
+    ) throws -> VocabularyNoteModel? {
+        let normalizedWord = word.normalizedVocabularyWord
+        guard !normalizedWord.isEmpty else { return nil }
+
+        let descriptor = FetchDescriptor<VocabularyNoteModel>(
+            predicate: #Predicate { item in
+                item.normalizedWord == normalizedWord
+            }
+        )
+
+        if let existing = try context.fetch(descriptor).first {
+            if (existing.phonetic ?? "").isEmpty && !quickLookup.phonetic.isEmpty {
+                existing.phonetic = quickLookup.phonetic
+            }
+            if (existing.partOfSpeech ?? "").isEmpty && !quickLookup.partOfSpeech.isEmpty {
+                existing.partOfSpeech = quickLookup.partOfSpeech
+            }
+            if (existing.vietnameseMeaning ?? "").isEmpty && !quickLookup.contextualMeaning.isEmpty {
+                existing.vietnameseMeaning = quickLookup.contextualMeaning
+            }
+            if existing.sourceText.isEmpty && !sourceText.isEmpty {
+                existing.sourceText = sourceText
+            }
+            existing.updatedAt = Date()
+            try context.save()
+            return existing
+        }
+
+        let displayWord = quickLookup.word.isEmpty ? word.trimmingCharacters(in: .punctuationCharacters) : quickLookup.word
+        let note = VocabularyNoteModel(
+            word: displayWord,
+            sourceText: sourceText,
+            phonetic: quickLookup.phonetic,
+            partOfSpeech: quickLookup.partOfSpeech,
+            vietnameseMeaning: quickLookup.contextualMeaning,
+            englishDefinition: quickLookup.grammarRoleInSentence,
+            exampleSentence: sourceText
         )
         context.insert(note)
         try context.save()

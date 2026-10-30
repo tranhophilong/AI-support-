@@ -18,6 +18,7 @@ struct ChatScreen: View {
     @Bindable var conversation: ConversationModel
     var highlightedWord: String? = nil
     var highlightedSourceText: String? = nil
+    var highlightedMessageID: UUID? = nil
 
     @Query private var vocabularyNotes: [VocabularyNoteModel]
 
@@ -57,8 +58,9 @@ struct ChatScreen: View {
     }
 
     private var targetHighlightedMessageID: UUID? {
-        guard let word = highlightedWord?.normalizedVocabularyWord, !word.isEmpty else {
-            return nil
+        if let highlightedMessageID,
+           conversation.messages.contains(where: { $0.id == highlightedMessageID }) {
+            return highlightedMessageID
         }
 
         let trimmedSource = highlightedSourceText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -69,17 +71,35 @@ struct ChatScreen: View {
             return matchedBySource.id
         }
 
-        return sorted.first(where: { messageContainsWord($0, normalizedWord: word) })?.id
+        if let word = highlightedWord?.normalizedVocabularyWord, !word.isEmpty {
+            return sorted.first(where: { messageContainsWord($0, normalizedWord: word) })?.id
+        }
+
+        return nil
     }
 
-    private func messageMatchesSource(_ msg: MessageModel, source: String) -> Bool {
-        let lowerSource = source.lowercased()
-        let candidates: [String] = [
+    private func candidateTexts(for msg: MessageModel) -> [String] {
+        var candidates: [String] = [
             msg.text,
             msg.fixed ?? "",
             msg.natural ?? "",
             msg.followUpQuestion ?? ""
-        ] + (msg.explanations ?? []) + (msg.suggestedReplies ?? [])
+        ]
+        if let alt = msg.alternativeExpressions {
+            candidates.append(contentsOf: alt)
+        }
+        if let exp = msg.explanations {
+            candidates.append(contentsOf: exp)
+        }
+        if let replies = msg.suggestedReplies {
+            candidates.append(contentsOf: replies)
+        }
+        return candidates
+    }
+
+    private func messageMatchesSource(_ msg: MessageModel, source: String) -> Bool {
+        let lowerSource = source.lowercased()
+        let candidates = candidateTexts(for: msg)
 
         return candidates.contains { candidate in
             let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -88,12 +108,7 @@ struct ChatScreen: View {
     }
 
     private func messageContainsWord(_ msg: MessageModel, normalizedWord: String) -> Bool {
-        let candidates: [String] = [
-            msg.text,
-            msg.fixed ?? "",
-            msg.natural ?? "",
-            msg.followUpQuestion ?? ""
-        ] + (msg.explanations ?? []) + (msg.suggestedReplies ?? [])
+        let candidates = candidateTexts(for: msg)
 
         return candidates.contains { candidate in
             candidate
@@ -135,7 +150,7 @@ struct ChatScreen: View {
                                             UserBubble(
                                                 id: item.id,
                                                 text: item.text,
-                                                isPickingWords: pickingTarget == WordPickTarget(messageID: item.id, section: "user"),
+                                                pickingTarget: pickingTarget,
                                                 savedWords: savedVocabularyWords,
                                                 isHighlightedMessage: isHighlightedMsg,
                                                 highlightedWord: activeHighlightWord,
@@ -145,8 +160,8 @@ struct ChatScreen: View {
                                                 onSaveVocabulary: { word in
                                                     saveVocabulary(word, sourceText: item.text, showToast: pickingTarget == nil)
                                                 },
-                                                onStartPickingWords: {
-                                                    pickingTarget = WordPickTarget(messageID: item.id, section: "user")
+                                                onStartPickingWords: { target in
+                                                    pickingTarget = target
                                                 },
                                                 onStopPickingWords: {
                                                     pickingTarget = nil
@@ -172,6 +187,7 @@ struct ChatScreen: View {
                                                 original: originalText,
                                                 fixed: fixed,
                                                 natural: natural,
+                                                alternativeExpressions: item.alternativeExpressions ?? [],
                                                 explanations: item.explanations ?? [],
                                                 explanationNoted: item.explanationNoted ?? [],
                                                 followUpQuestion: item.followUpQuestion,
@@ -182,7 +198,14 @@ struct ChatScreen: View {
                                                 highlightedWord: activeHighlightWord,
                                                 highlightedSourceText: activeHighlightSource,
                                                 onSave: { noteText, isExplanation, noted in
-                                                    saveNote(text: noteText, originalText: originalText, context: fixed, isExplanation: isExplanation, explanationNoted: noted)
+                                                    saveNote(
+                                                        text: noteText,
+                                                        originalText: originalText,
+                                                        context: fixed,
+                                                        isExplanation: isExplanation,
+                                                        explanationNoted: noted,
+                                                        sourceMessageID: item.id
+                                                    )
                                                 },
                                                 onCopy: { text in
                                                     copyText(text)
@@ -273,6 +296,24 @@ struct ChatScreen: View {
                                         proxy.scrollTo(targetID, anchor: .center)
                                     } else {
                                         proxy.scrollTo("bottom", anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                        .onChange(of: highlightedMessageID) { _, _ in
+                            if let targetID = targetHighlightedMessageID {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo(targetID, anchor: .center)
+                                    }
+                                }
+                            }
+                        }
+                        .onChange(of: highlightedSourceText) { _, _ in
+                            if let targetID = targetHighlightedMessageID {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo(targetID, anchor: .center)
                                     }
                                 }
                             }
@@ -794,13 +835,23 @@ struct ChatScreen: View {
 
     // MARK: - Save Note
 
-    private func saveNote(text: String, originalText: String, context: String, isExplanation: Bool, explanationNoted: String? = nil) {
+    private func saveNote(
+        text: String,
+        originalText: String,
+        context: String,
+        isExplanation: Bool,
+        explanationNoted: String? = nil,
+        sourceMessageID: UUID? = nil
+    ) {
         let note = SavedNoteModel(
             text: text,
             originalText: originalText,
             originalContext: context,
             isExplanation: isExplanation,
-            explanationNoted: explanationNoted
+            explanationNoted: explanationNoted,
+            sourceConversationID: conversation.id,
+            sourceMessageID: sourceMessageID,
+            sourceConversationTitle: conversation.title
         )
         self.context.insert(note)
 
@@ -915,6 +966,7 @@ struct ChatScreen: View {
                         isUser: false,
                         fixed: response.fixed,
                         natural: response.natural,
+                        alternativeExpressions: response.alternativeExpressions,
                         explanations: response.explanations.map { $0.text },
                         explanationNoted: response.explanations.map { $0.explanation_noted ?? "" },
                         followUpQuestion: response.followUpQuestion,
@@ -943,9 +995,19 @@ struct ChatScreen: View {
     }
 }
 
+enum WordInteractionMode: String, Hashable {
+    case pickWord
+    case lightPickWord
+}
+
 struct WordPickTarget: Hashable {
     let messageID: UUID
     let section: String
+    var mode: WordInteractionMode = .pickWord
+
+    func matchesSection(_ other: WordPickTarget) -> Bool {
+        messageID == other.messageID && section == other.section
+    }
 }
 
 func vocabularyHighlightedText(
@@ -984,18 +1046,19 @@ struct UserBubble: View {
 
     let id: UUID
     let text: String
-    let isPickingWords: Bool
+    let pickingTarget: WordPickTarget?
     let savedWords: Set<String>
     var isHighlightedMessage: Bool = false
     var highlightedWord: String? = nil
     let onCopy: () -> Void
     let onSaveVocabulary: (String) -> Void
-    let onStartPickingWords: () -> Void
+    let onStartPickingWords: (WordPickTarget) -> Void
     let onStopPickingWords: () -> Void
     let onFollowUp: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
+        let baseTarget = WordPickTarget(messageID: id, section: "message")
 
         HStack {
 
@@ -1021,9 +1084,10 @@ struct UserBubble: View {
                 }
 
                 Group {
-                    if isPickingWords {
+                    if let activeTarget = pickingTarget, activeTarget.matchesSection(baseTarget) {
                         WordPickerText(
                             text: text,
+                            mode: activeTarget.mode,
                             foregroundStyle: .white,
                             chipBackground: AppTheme.Primary.p700,
                             modeBackground: AppTheme.Primary.p700.opacity(0.38),
@@ -1043,7 +1107,12 @@ struct UserBubble: View {
                         .messageActions(
                             speakText: text,
                             onCopy: onCopy,
-                            onPickWords: onStartPickingWords,
+                            onPickWords: {
+                                onStartPickingWords(WordPickTarget(messageID: id, section: "message", mode: .pickWord))
+                            },
+                            onLightPickWords: {
+                                onStartPickingWords(WordPickTarget(messageID: id, section: "message", mode: .lightPickWord))
+                            },
                             onFollowUp: onFollowUp,
                             onDelete: onDelete
                         )
@@ -1077,6 +1146,7 @@ struct AIBubble: View {
     let original: String
     let fixed: String
     let natural: String
+    var alternativeExpressions: [String] = []
     let explanations: [String]
     let explanationNoted: [String]
     let followUpQuestion: String?
@@ -1119,12 +1189,19 @@ struct AIBubble: View {
 
         VStack(alignment: .leading, spacing: 16) {
 
-            if isHighlightedMessage, let highlightedWord, !highlightedWord.isEmpty {
+            if isHighlightedMessage {
                 HStack(spacing: 6) {
-                    Image(systemName: "bookmark.fill")
-                        .font(.caption2.weight(.bold))
-                    Text("Từ vựng đã lưu: \"\(highlightedWord)\"")
-                        .font(.caption.weight(.bold))
+                    if let highlightedWord, !highlightedWord.isEmpty {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption2.weight(.bold))
+                        Text("Từ vựng đã lưu: \"\(highlightedWord)\"")
+                            .font(.caption.weight(.bold))
+                    } else {
+                        Image(systemName: "note.text")
+                            .font(.caption2.weight(.bold))
+                        Text("Vị trí ghi chú đã lưu")
+                            .font(.caption.weight(.bold))
+                    }
                 }
                 .foregroundStyle(AppTheme.Accent.a600)
                 .padding(.horizontal, 10)
@@ -1165,9 +1242,10 @@ struct AIBubble: View {
                 let fixedHighlighted = isSectionHighlighted(fixed)
 
                 Group {
-                    if pickingTarget == fixedTarget {
+                    if let activeTarget = pickingTarget, activeTarget.matchesSection(fixedTarget) {
                         WordPickerText(
                             text: fixed,
+                            mode: activeTarget.mode,
                             foregroundStyle: AppTheme.Neutral.n900,
                             chipBackground: AppTheme.Surface.card,
                             modeBackground: AppTheme.Accent.a50,
@@ -1188,7 +1266,10 @@ struct AIBubble: View {
                                     onCopy(fixed)
                                 },
                                 onPickWords: {
-                                    onStartPickingWords(fixedTarget)
+                                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "fixed", mode: .pickWord))
+                                },
+                                onLightPickWords: {
+                                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "fixed", mode: .lightPickWord))
                                 },
                                 onFollowUp: {
                                     onFollowUp(fixed)
@@ -1238,9 +1319,10 @@ struct AIBubble: View {
                 let naturalHighlighted = isSectionHighlighted(natural)
 
                 Group {
-                    if pickingTarget == naturalTarget {
+                    if let activeTarget = pickingTarget, activeTarget.matchesSection(naturalTarget) {
                         WordPickerText(
                             text: natural,
+                            mode: activeTarget.mode,
                             foregroundStyle: AppTheme.Neutral.n900,
                             chipBackground: AppTheme.Surface.card,
                             modeBackground: AppTheme.Accent.a50,
@@ -1265,7 +1347,10 @@ struct AIBubble: View {
                                     onCopy(natural)
                                 },
                                 onPickWords: {
-                                    onStartPickingWords(naturalTarget)
+                                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "natural", mode: .pickWord))
+                                },
+                                onLightPickWords: {
+                                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "natural", mode: .lightPickWord))
                                 },
                                 onFollowUp: {
                                     onFollowUp(natural)
@@ -1287,6 +1372,14 @@ struct AIBubble: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            let validAlternatives = alternativeExpressions
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            if !validAlternatives.isEmpty {
+                alternativeExpressionsSection(validAlternatives)
+            }
+
             if !explanations.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Explanations")
@@ -1296,11 +1389,13 @@ struct AIBubble: View {
                     ForEach(Array(explanations.enumerated()), id: \.offset) { index, item in
                         let noted = (index < explanationNoted.count) ? explanationNoted[index] : nil
                         let explanationTarget = WordPickTarget(messageID: messageID, section: "explanation-\(index)")
+                        let expHighlighted = isSectionHighlighted(item)
                         HStack(alignment: .top, spacing: 8) {
                             Group {
-                                if pickingTarget == explanationTarget {
+                                if let activeTarget = pickingTarget, activeTarget.matchesSection(explanationTarget) {
                                     WordPickerText(
                                         text: item,
+                                        mode: activeTarget.mode,
                                         foregroundStyle: AppTheme.Neutral.n700,
                                         chipBackground: AppTheme.Surface.cardMuted,
                                         modeBackground: AppTheme.Accent.a50,
@@ -1321,7 +1416,10 @@ struct AIBubble: View {
                                                 onCopy(item)
                                             },
                                             onPickWords: {
-                                                onStartPickingWords(explanationTarget)
+                                                onStartPickingWords(WordPickTarget(messageID: messageID, section: "explanation-\(index)", mode: .pickWord))
+                                            },
+                                            onLightPickWords: {
+                                                onStartPickingWords(WordPickTarget(messageID: messageID, section: "explanation-\(index)", mode: .lightPickWord))
                                             },
                                             onFollowUp: {
                                                 onFollowUp(item)
@@ -1338,6 +1436,17 @@ struct AIBubble: View {
                                 Image(systemName: "plus.square.on.square")
                                     .font(.caption2)
                                     .foregroundStyle(AppTheme.Neutral.n500)
+                            }
+                        }
+                        .padding(expHighlighted ? 8 : 0)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(expHighlighted ? AppTheme.Accent.a50 : Color.clear)
+                        )
+                        .overlay {
+                            if expHighlighted {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(AppTheme.Accent.a500, lineWidth: 1.5)
                             }
                         }
                     }
@@ -1384,9 +1493,10 @@ struct AIBubble: View {
                         let questionHighlighted = isSectionHighlighted(trimmedQuestion)
 
                         Group {
-                            if pickingTarget == followUpTarget {
+                            if let activeTarget = pickingTarget, activeTarget.matchesSection(followUpTarget) {
                                 WordPickerText(
                                     text: trimmedQuestion,
+                                    mode: activeTarget.mode,
                                     foregroundStyle: AppTheme.Neutral.n900,
                                     chipBackground: AppTheme.Surface.card,
                                     modeBackground: AppTheme.Accent.a50,
@@ -1410,7 +1520,10 @@ struct AIBubble: View {
                                             onCopy(trimmedQuestion)
                                         },
                                         onPickWords: {
-                                            onStartPickingWords(followUpTarget)
+                                            onStartPickingWords(WordPickTarget(messageID: messageID, section: "followUp", mode: .pickWord))
+                                        },
+                                        onLightPickWords: {
+                                            onStartPickingWords(WordPickTarget(messageID: messageID, section: "followUp", mode: .lightPickWord))
                                         },
                                         onFollowUp: {
                                             onFollowUp(trimmedQuestion)
@@ -1441,9 +1554,10 @@ struct AIBubble: View {
                                 let replyTarget = WordPickTarget(messageID: messageID, section: "reply-\(index)")
                                 let replyHighlighted = isSectionHighlighted(reply)
 
-                                if pickingTarget == replyTarget {
+                                if let activeTarget = pickingTarget, activeTarget.matchesSection(replyTarget) {
                                     WordPickerText(
                                         text: reply,
+                                        mode: activeTarget.mode,
                                         foregroundStyle: AppTheme.Neutral.n900,
                                         chipBackground: AppTheme.Surface.card,
                                         modeBackground: AppTheme.Accent.a50,
@@ -1499,7 +1613,10 @@ struct AIBubble: View {
                                             onCopy(reply)
                                         },
                                         onPickWords: {
-                                            onStartPickingWords(replyTarget)
+                                            onStartPickingWords(WordPickTarget(messageID: messageID, section: "reply-\(index)", mode: .pickWord))
+                                        },
+                                        onLightPickWords: {
+                                            onStartPickingWords(WordPickTarget(messageID: messageID, section: "reply-\(index)", mode: .lightPickWord))
                                         },
                                         onFollowUp: {
                                             onFollowUp(reply)
@@ -1530,6 +1647,94 @@ struct AIBubble: View {
             x: 0,
             y: 6
         )
+    }
+
+    @ViewBuilder
+    private func alternativeExpressionsSection(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Cách nói khác (Other ways to say)", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption.bold())
+                .foregroundStyle(AppTheme.Accent.a600)
+
+            ForEach(Array(items.enumerated()), id: \.offset) { index, alt in
+                alternativeExpressionRow(index: index, text: alt)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func alternativeExpressionRow(index: Int, text: String) -> some View {
+        let baseTarget = WordPickTarget(messageID: messageID, section: "alt-\(index)")
+        let activeMode: WordInteractionMode? = (pickingTarget?.matchesSection(baseTarget) == true) ? pickingTarget?.mode : nil
+        let isAltHighlighted = isSectionHighlighted(text)
+
+        if let activeMode {
+            WordPickerText(
+                text: text,
+                mode: activeMode,
+                foregroundStyle: AppTheme.Neutral.n900,
+                chipBackground: AppTheme.Surface.card,
+                modeBackground: AppTheme.Accent.a50,
+                savedWords: savedWords,
+                onPick: { word in
+                    onSaveVocabulary(word, text)
+                },
+                onDone: onStopPickingWords
+            )
+        } else {
+            HStack(alignment: .center, spacing: 8) {
+                vocabularyHighlightedText(
+                    text,
+                    targetWord: highlightedWord,
+                    defaultColor: AppTheme.Neutral.n900
+                )
+                .font(.subheadline.weight(.medium))
+                .lineLimit(nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                SpeakButton(
+                    text: text,
+                    font: .caption,
+                    activeColor: AppTheme.Accent.a600
+                )
+
+                Button {
+                    onSave(text, false, nil)
+                } label: {
+                    Image(systemName: "plus.square.on.square")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(AppTheme.Accent.a50.opacity(0.65))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(
+                        isAltHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
+                        lineWidth: isAltHighlighted ? 2.0 : 1.0
+                    )
+            }
+            .messageActions(
+                speakText: text,
+                onCopy: {
+                    onCopy(text)
+                },
+                onPickWords: {
+                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "alt-\(index)", mode: .pickWord))
+                },
+                onLightPickWords: {
+                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "alt-\(index)", mode: .lightPickWord))
+                },
+                onFollowUp: {
+                    onFollowUp(text)
+                },
+                onDelete: onDelete
+            )
+        }
     }
 
     private func explanationText(_ text: String, highlight: String? = nil) -> Text {
@@ -1603,6 +1808,7 @@ struct AIBubble: View {
 
 struct WordPickerText: View {
     let text: String
+    var mode: WordInteractionMode = .pickWord
     let foregroundStyle: Color
     let chipBackground: Color
     let modeBackground: Color
@@ -1613,6 +1819,7 @@ struct WordPickerText: View {
     @AppStorage("wordPickerUsesPills") private var usesPills = true
     @State private var selectedWords: Set<String> = []
     @State private var sessionSavedWords: Set<String> = []
+    @State private var activePopoverIndex: Int?
 
     private var words: [String] {
         text.split(whereSeparator: \.isWhitespace)
@@ -1623,9 +1830,15 @@ struct WordPickerText: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Label("Pick word", systemImage: "hand.tap")
-                    .font(.caption.bold())
-                    .foregroundStyle(foregroundStyle)
+                if mode == .pickWord {
+                    Label("Pick words", systemImage: "hand.tap")
+                        .font(.caption.bold())
+                        .foregroundStyle(foregroundStyle)
+                } else {
+                    Label("Light pick word", systemImage: "character.book.closed.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(foregroundStyle)
+                }
 
                 Spacer()
 
@@ -1641,15 +1854,16 @@ struct WordPickerText: View {
                 .font(.caption.bold())
                 .foregroundStyle(foregroundStyle)
 
-                Button {
-                    addSelectedWords()
-                } label: {
-                    Label("Add selected", systemImage: "plus")
-                        .labelStyle(.iconOnly)
+                if mode == .pickWord && !selectedWords.isEmpty {
+                    Button {
+                        addSelectedWords()
+                    } label: {
+                        Label("Add selected", systemImage: "plus")
+                            .labelStyle(.iconOnly)
+                    }
+                    .font(.caption.bold())
+                    .foregroundStyle(foregroundStyle)
                 }
-                .font(.caption.bold())
-                .foregroundStyle(selectedWords.isEmpty ? foregroundStyle.opacity(0.35) : foregroundStyle)
-                .disabled(selectedWords.isEmpty)
 
                 Button("Done", action: onDone)
                     .font(.caption.bold())
@@ -1657,25 +1871,30 @@ struct WordPickerText: View {
             }
 
             WordPickerFlowLayout(spacing: 8, lineSpacing: 8) {
-                ForEach(Array(words.enumerated()), id: \.offset) { _, word in
+                ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                     let normalizedWord = word.normalizedVocabularyWord
-                    let isSelected = selectedWords.contains(normalizedWord)
+                    let isSelected = (mode == .pickWord)
+                        ? selectedWords.contains(normalizedWord)
+                        : (activePopoverIndex == index)
                     let isSaved = savedWords.contains(normalizedWord) || sessionSavedWords.contains(normalizedWord)
+                    let displayWord = word.trimmingCharacters(in: .punctuationCharacters)
 
                     Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            if isSaved {
-                                return
+                        if mode == .pickWord {
+                            guard !isSaved else { return }
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                                if selectedWords.contains(normalizedWord) {
+                                    selectedWords.remove(normalizedWord)
+                                } else {
+                                    selectedWords.insert(normalizedWord)
+                                }
                             }
-
-                            if isSelected {
-                                selectedWords.remove(normalizedWord)
-                            } else {
-                                selectedWords.insert(normalizedWord)
+                        } else {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                activePopoverIndex = index
                             }
                         }
                     } label: {
-                        let displayWord = word.trimmingCharacters(in: .punctuationCharacters)
                         let activeBackground = isSaved
                         ? AppTheme.Semantic.success
                         : AppTheme.Accent.a500
@@ -1746,6 +1965,33 @@ struct WordPickerText: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .disabled(mode == .pickWord && isSaved)
+                    .popover(
+                        isPresented: Binding(
+                            get: { mode == .lightPickWord && activePopoverIndex == index },
+                            set: { isPresented in
+                                if !isPresented && activePopoverIndex == index {
+                                    activePopoverIndex = nil
+                                }
+                            }
+                        ),
+                        attachmentAnchor: .rect(.bounds)
+                    ) {
+                        QuickWordLookupPopoverView(
+                            word: displayWord.isEmpty ? word : displayWord,
+                            sentence: text,
+                            isAlreadySaved: isSaved,
+                            onSaveWord: {
+                                sessionSavedWords.insert(normalizedWord)
+                                onPick(normalizedWord)
+                            },
+                            onAnalyzeFullSentence: {
+                                activePopoverIndex = nil
+                                StructureNavigationCoordinator.shared.openAndAnalyze(text)
+                            }
+                        )
+                        .presentationCompactAdaptation(.popover)
+                    }
                 }
             }
         }
@@ -1769,6 +2015,346 @@ struct WordPickerText: View {
 
         for word in wordsToSave {
             onPick(word)
+        }
+    }
+}
+
+struct LightPickableSentenceText: View {
+    let sentence: String
+    var font: Font = .title3.weight(.bold)
+    var foregroundColor: Color = AppTheme.Neutral.n900
+    let savedWords: Set<String>
+    let onSaveVocabulary: (String, String) -> Void
+
+    @State private var activePopoverIndex: Int?
+    @State private var sessionSavedWords: Set<String> = []
+
+    private var tokens: [String] {
+        sentence.split(whereSeparator: \.isWhitespace).map(String.init)
+    }
+
+    var body: some View {
+        WordPickerFlowLayout(spacing: 5, lineSpacing: 6) {
+            ForEach(Array(tokens.enumerated()), id: \.offset) { index, rawToken in
+                let normalized = rawToken.normalizedVocabularyWord
+                let cleanWord = rawToken.trimmingCharacters(in: .punctuationCharacters)
+                let isSelected = (activePopoverIndex == index)
+                let isSaved = savedWords.contains(normalized) || sessionSavedWords.contains(normalized)
+
+                Button {
+                    guard !normalized.isEmpty else { return }
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
+                        activePopoverIndex = index
+                    }
+                } label: {
+                    Text(rawToken)
+                        .font(font)
+                        .foregroundStyle(
+                            isSelected
+                            ? AppTheme.Primary.p700
+                            : isSaved ? AppTheme.Semantic.success : foregroundColor
+                        )
+                        .padding(.horizontal, isSelected ? 5 : 2)
+                        .padding(.vertical, 2)
+                        .background(
+                            isSelected
+                            ? AppTheme.Primary.p100
+                            : isSaved ? AppTheme.Semantic.success.opacity(0.1) : Color.clear
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(
+                                    isSelected
+                                    ? AppTheme.Primary.p500
+                                    : isSaved ? AppTheme.Semantic.success.opacity(0.6) : AppTheme.Neutral.n400.opacity(0.35)
+                                )
+                                .frame(height: isSelected ? 2 : 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .popover(
+                    isPresented: Binding(
+                        get: { activePopoverIndex == index },
+                        set: { isPresented in
+                            if !isPresented && activePopoverIndex == index {
+                                activePopoverIndex = nil
+                            }
+                        }
+                    ),
+                    attachmentAnchor: .rect(.bounds)
+                ) {
+                    QuickWordLookupPopoverView(
+                        word: cleanWord.isEmpty ? rawToken : cleanWord,
+                        sentence: sentence,
+                        isAlreadySaved: isSaved,
+                        onSaveWord: {
+                            sessionSavedWords.insert(normalized)
+                            onSaveVocabulary(cleanWord.isEmpty ? rawToken : cleanWord, sentence)
+                        },
+                        onAnalyzeFullSentence: nil
+                    )
+                    .presentationCompactAdaptation(.popover)
+                }
+            }
+        }
+    }
+}
+
+struct QuickWordLookupPopoverView: View {
+    @Environment(\.modelContext) private var context
+
+    let word: String
+    let sentence: String
+    let isAlreadySaved: Bool
+    let onSaveWord: () -> Void
+    let onAnalyzeFullSentence: (() -> Void)?
+
+    @AppStorage("selectedAIModel") private var selectedAIModelRawValue = AIModelOption.groqGPTOSS20B.rawValue
+
+    @State private var result: AIQuickWordLookupResponse?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var hasSaved = false
+
+    private var selectedAIModel: AIModelOption {
+        AIModelOption(rawValue: selectedAIModelRawValue) ?? .groqGPTOSS20B
+    }
+
+    private var effectiveSaved: Bool {
+        isAlreadySaved || hasSaved
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // 1. HEADER: WORD + IPA + POS + SPEAK
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(result?.word.isEmpty == false ? result!.word : word)
+                            .font(.headline.bold())
+                            .foregroundStyle(AppTheme.Neutral.n900)
+
+                        if let baseForm = result?.baseForm,
+                           !baseForm.isEmpty,
+                           baseForm.lowercased() != word.lowercased() {
+                            Text("(\(baseForm))")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(AppTheme.Neutral.n500)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        if let phonetic = result?.phonetic, !phonetic.isEmpty {
+                            Text(phonetic)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Neutral.n500)
+                        }
+
+                        if let pos = result?.partOfSpeech, !pos.isEmpty {
+                            Text(pos)
+                                .font(.caption2.bold())
+                                .foregroundStyle(AppTheme.Primary.p700)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(AppTheme.Primary.p50)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+
+                Spacer()
+
+                SpeakButton(
+                    text: word,
+                    slow: false,
+                    font: .caption.weight(.semibold),
+                    activeColor: AppTheme.Primary.p500,
+                    showBackground: true
+                )
+
+                SpeakButton(
+                    text: word,
+                    slow: true,
+                    font: .caption.weight(.semibold),
+                    activeColor: AppTheme.Accent.a600,
+                    showBackground: true
+                )
+            }
+
+            Divider()
+                .overlay(AppTheme.Surface.border)
+
+            // 2. BODY: MEANING & GRAMMAR ROLE IN SENTENCE
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AppTheme.Primary.p500)
+                    Text("Đang tra nghĩa & vai trò trong câu...")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+                .padding(.vertical, 10)
+            } else if let errorMessage {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Semantic.error)
+                        .lineLimit(2)
+
+                    Button("Thử lại") {
+                        performLookup(force: true)
+                    }
+                    .font(.caption.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
+                }
+            } else if let result {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Contextual Meaning
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Nghĩa trong câu")
+                            .font(.caption2.bold())
+                            .foregroundStyle(AppTheme.Primary.p500)
+
+                        Text(result.contextualMeaning)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.Neutral.n900)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    // Role in Sentence Structure
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Vai trò & Cấu trúc câu")
+                            .font(.caption2.bold())
+                            .foregroundStyle(AppTheme.Accent.a600)
+
+                        Text(result.grammarRoleInSentence)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Neutral.n700)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let pattern = result.structurePattern?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !pattern.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "function")
+                                    .font(.caption2)
+                                Text(pattern)
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(AppTheme.Primary.p700)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(AppTheme.Primary.p50)
+                            .clipShape(Capsule())
+                            .padding(.top, 2)
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.Surface.cardMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+
+            // 3. FOOTER ACTIONS
+            HStack(spacing: 8) {
+                Button {
+                    saveWordToStore()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: effectiveSaved ? "checkmark.circle.fill" : "bookmark.fill")
+                        Text(effectiveSaved ? "Đã lưu" : "Lưu từ")
+                    }
+                    .font(.caption.bold())
+                    .foregroundStyle(effectiveSaved ? AppTheme.Semantic.success : .white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        effectiveSaved
+                        ? AppTheme.Semantic.success.opacity(0.14)
+                        : AppTheme.Primary.p500
+                    )
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                if let onAnalyzeFullSentence {
+                    Button(action: onAnalyzeFullSentence) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.3.group.fill")
+                            Text("Cấu trúc câu")
+                        }
+                        .font(.caption.bold())
+                        .foregroundStyle(AppTheme.Primary.p700)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(AppTheme.Primary.p50)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 2)
+        }
+        .padding(14)
+        .frame(width: 285)
+        .background(AppTheme.Surface.card)
+        .onAppear {
+            performLookup(force: false)
+        }
+    }
+
+    private func saveWordToStore() {
+        if let result {
+            _ = try? VocabularyNoteStore.saveQuickLookupResult(
+                word: word,
+                quickLookup: result,
+                sourceText: sentence,
+                in: context
+            )
+        }
+        hasSaved = true
+        onSaveWord()
+    }
+
+    private func performLookup(force: Bool) {
+        errorMessage = nil
+
+        if !force, let cached = QuickWordLookupCache.shared.get(word: word, sentence: sentence) {
+            result = cached
+            return
+        }
+
+        isLoading = true
+        let provider = selectedAIModel.makeVocabularyProvider()
+
+        Task {
+            do {
+                let service = VocabularyAIService(provider: provider)
+                let response = try await service.quickLookupWord(word: word, sentence: sentence)
+
+                await MainActor.run {
+                    QuickWordLookupCache.shared.set(response, word: word, sentence: sentence)
+                    result = response
+                    isLoading = false
+
+                    if effectiveSaved {
+                        _ = try? VocabularyNoteStore.saveQuickLookupResult(
+                            word: word,
+                            quickLookup: response,
+                            sourceText: sentence,
+                            in: context
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isLoading = false
+                }
+            }
         }
     }
 }
@@ -1894,9 +2480,10 @@ struct StarterAIBubble: View {
                 }
 
                 Group {
-                    if pickingTarget == target {
+                    if let activeTarget = pickingTarget, activeTarget.matchesSection(target) {
                         WordPickerText(
                             text: text,
+                            mode: activeTarget.mode,
                             foregroundStyle: AppTheme.Neutral.n900,
                             chipBackground: AppTheme.Surface.card,
                             modeBackground: AppTheme.Accent.a50,
@@ -1922,7 +2509,10 @@ struct StarterAIBubble: View {
                                     onCopy(text)
                                 },
                                 onPickWords: {
-                                    onStartPickingWords(target)
+                                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "message", mode: .pickWord))
+                                },
+                                onLightPickWords: {
+                                    onStartPickingWords(WordPickTarget(messageID: messageID, section: "message", mode: .lightPickWord))
                                 },
                                 onFollowUp: {
                                     onFollowUp(text)
@@ -1948,9 +2538,10 @@ struct StarterAIBubble: View {
                         ForEach(Array(validReplies.enumerated()), id: \.offset) { index, reply in
                             let replyTarget = WordPickTarget(messageID: messageID, section: "starter-reply-\(index)")
 
-                            if pickingTarget == replyTarget {
+                            if let activeTarget = pickingTarget, activeTarget.matchesSection(replyTarget) {
                                 WordPickerText(
                                     text: reply,
+                                    mode: activeTarget.mode,
                                     foregroundStyle: AppTheme.Neutral.n900,
                                     chipBackground: AppTheme.Surface.card,
                                     modeBackground: AppTheme.Accent.a50,
@@ -2003,7 +2594,10 @@ struct StarterAIBubble: View {
                                         onCopy(reply)
                                     },
                                     onPickWords: {
-                                        onStartPickingWords(replyTarget)
+                                        onStartPickingWords(WordPickTarget(messageID: messageID, section: "starter-reply-\(index)", mode: .pickWord))
+                                    },
+                                    onLightPickWords: {
+                                        onStartPickingWords(WordPickTarget(messageID: messageID, section: "starter-reply-\(index)", mode: .lightPickWord))
                                     },
                                     onFollowUp: {
                                         onFollowUp(reply)
@@ -2036,52 +2630,364 @@ struct StarterAIBubble: View {
     }
 }
 
+@MainActor
+final class QuickSentenceAnalysisCache {
+    static let shared = QuickSentenceAnalysisCache()
+    private var cache: [String: AISentenceStructureResponse] = [:]
+
+    private init() {}
+
+    private func makeKey(sentence: String) -> String {
+        sentence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    func get(sentence: String) -> AISentenceStructureResponse? {
+        cache[makeKey(sentence: sentence)]
+    }
+
+    func set(_ response: AISentenceStructureResponse, sentence: String) {
+        cache[makeKey(sentence: sentence)] = response
+    }
+}
+
+struct QuickSentenceAnalysisPopoverView: View {
+    let sentence: String
+    let onOpenFullAnalysis: () -> Void
+
+    @AppStorage("selectedAIModel") private var selectedAIModelRawValue = AIModelOption.groqGPTOSS20B.rawValue
+
+    @State private var result: AISentenceStructureResponse?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    private var selectedAIModel: AIModelOption {
+        AIModelOption(rawValue: selectedAIModelRawValue) ?? .groqGPTOSS20B
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // HEADER
+            HStack(spacing: 8) {
+                Label("Light Analysis", systemImage: "sparkles.rectangle.stack.fill")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(AppTheme.Primary.p700)
+
+                Spacer()
+
+                SpeakButton(
+                    text: sentence,
+                    slow: false,
+                    font: .caption.weight(.semibold),
+                    activeColor: AppTheme.Primary.p500,
+                    showBackground: true
+                )
+            }
+
+            Divider()
+                .overlay(AppTheme.Surface.border)
+
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AppTheme.Primary.p500)
+                    Text("Đang phân tích nhanh cấu trúc câu...")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+                .padding(.vertical, 12)
+            } else if let errorMessage {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Semantic.error)
+                        .lineLimit(2)
+
+                    Button("Thử lại") {
+                        performAnalysis(force: true)
+                    }
+                    .font(.caption.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
+                }
+            } else if let result {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        // Translation
+                        if !result.vietnameseTranslation.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Tạm dịch")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(AppTheme.Primary.p500)
+                                Text(result.vietnameseTranslation)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.Neutral.n900)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        // Formula & Tense badges
+                        WordPickerFlowLayout(spacing: 6, lineSpacing: 6) {
+                            if !result.generalFormula.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "function")
+                                        .font(.caption2)
+                                    Text(result.generalFormula)
+                                        .font(.caption2.bold())
+                                }
+                                .foregroundStyle(AppTheme.Primary.p700)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.Primary.p50)
+                                .clipShape(Capsule())
+                            }
+
+                            if !result.tense.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "clock.fill")
+                                        .font(.caption2)
+                                    Text(result.tense)
+                                        .font(.caption2.bold())
+                                }
+                                .foregroundStyle(AppTheme.Accent.a600)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.Accent.a50)
+                                .clipShape(Capsule())
+                            }
+                        }
+
+                        // Main Components (S - V - O...)
+                        if !result.components.isEmpty {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Thành phần câu")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(AppTheme.Neutral.n500)
+
+                                ForEach(result.components.prefix(4)) { comp in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                            Text(comp.symbol)
+                                                .font(.caption2.bold())
+                                                .foregroundStyle(AppTheme.Primary.p700)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(AppTheme.Primary.p50)
+                                                .clipShape(Capsule())
+
+                                            Text(comp.segment)
+                                                .font(.caption.bold())
+                                                .foregroundStyle(AppTheme.Neutral.n900)
+                                        }
+
+                                        if !comp.explanation.isEmpty {
+                                            Text(comp.explanation)
+                                                .font(.caption2)
+                                                .foregroundStyle(AppTheme.Neutral.n500)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                    .padding(7)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(AppTheme.Surface.cardMuted)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                        }
+
+                        // Key Grammar Point
+                        if let firstPattern = result.grammarPatterns.first {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "lightbulb.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(AppTheme.Semantic.warning)
+                                    Text(firstPattern.pattern)
+                                        .font(.caption.bold())
+                                        .foregroundStyle(AppTheme.Primary.p700)
+                                }
+
+                                Text(firstPattern.explanation)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.Neutral.n700)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AppTheme.Primary.p50.opacity(0.6))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+
+            // FOOTER: OPEN FULL STRUCTURE TAB
+            Button(action: onOpenFullAnalysis) {
+                HStack(spacing: 5) {
+                    Image(systemName: "rectangle.3.group.fill")
+                    Text("Xem chi tiết tại tab Structure")
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(AppTheme.Primary.p500)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+        }
+        .padding(14)
+        .frame(width: 310)
+        .background(AppTheme.Surface.card)
+        .onAppear {
+            performAnalysis(force: false)
+        }
+    }
+
+    private func performAnalysis(force: Bool) {
+        errorMessage = nil
+
+        if !force, let cached = QuickSentenceAnalysisCache.shared.get(sentence: sentence) {
+            result = cached
+            return
+        }
+
+        isLoading = true
+        let provider = selectedAIModel.makeSentenceStructureProvider()
+
+        Task {
+            do {
+                let service = SentenceStructureAIService(provider: provider)
+                let response = try await service.analyzeSentence(sentence: sentence)
+
+                await MainActor.run {
+                    QuickSentenceAnalysisCache.shared.set(response, sentence: sentence)
+                    result = response
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isLoading = false
+                }
+            }
+        }
+    }
+}
+
+private struct MessageActionsModifier: ViewModifier {
+    let speakText: String?
+    let onCopy: () -> Void
+    let onPickWords: (() -> Void)?
+    let onLightPickWords: (() -> Void)?
+    let onFollowUp: () -> Void
+    let onDelete: (() -> Void)?
+
+    @State private var showLightAnalysis = false
+
+    private var trimmedSpeakText: String {
+        speakText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                if !trimmedSpeakText.isEmpty {
+                    Button {
+                        SpeechSynthesizerManager.shared.toggleSpeak(trimmedSpeakText)
+                    } label: {
+                        Label("Speak", systemImage: "speaker.wave.2.fill")
+                    }
+                }
+
+                Button {
+                    onCopy()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+
+                if let onPickWords {
+                    Button {
+                        onPickWords()
+                    } label: {
+                        Label("Pick word", systemImage: "hand.tap")
+                    }
+                }
+
+                if let onLightPickWords {
+                    Button {
+                        onLightPickWords()
+                    } label: {
+                        Label("Light pick word", systemImage: "character.book.closed.fill")
+                    }
+                }
+
+                if !trimmedSpeakText.isEmpty {
+                    Button {
+                        showLightAnalysis = true
+                    } label: {
+                        Label("Light analysis", systemImage: "sparkles.rectangle.stack.fill")
+                    }
+
+                    Button {
+                        StructureNavigationCoordinator.shared.openAndAnalyze(trimmedSpeakText)
+                    } label: {
+                        Label("Phân tích cấu trúc", systemImage: "rectangle.3.group.fill")
+                    }
+                }
+
+                Button {
+                    onFollowUp()
+                } label: {
+                    Label("Follow up", systemImage: "arrowshape.turn.up.left")
+                }
+
+                if let onDelete {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label("Xoá", systemImage: "trash")
+                    }
+                }
+            }
+            .popover(
+                isPresented: $showLightAnalysis,
+                attachmentAnchor: .rect(.bounds)
+            ) {
+                QuickSentenceAnalysisPopoverView(
+                    sentence: trimmedSpeakText,
+                    onOpenFullAnalysis: {
+                        showLightAnalysis = false
+                        StructureNavigationCoordinator.shared.openAndAnalyze(trimmedSpeakText)
+                    }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
+    }
+}
+
 private extension View {
 
     func messageActions(
         speakText: String? = nil,
         onCopy: @escaping () -> Void,
         onPickWords: (() -> Void)? = nil,
+        onLightPickWords: (() -> Void)? = nil,
         onFollowUp: @escaping () -> Void,
         onDelete: (() -> Void)? = nil
     ) -> some View {
-        contextMenu {
-            if let speakText, !speakText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button {
-                    SpeechSynthesizerManager.shared.toggleSpeak(speakText)
-                } label: {
-                    Label("Speak", systemImage: "speaker.wave.2.fill")
-                }
-            }
-
-            Button {
-                onCopy()
-            } label: {
-                Label("Copy", systemImage: "doc.on.doc")
-            }
-
-            if let onPickWords {
-                Button {
-                    onPickWords()
-                } label: {
-                    Label("Pick word", systemImage: "hand.tap")
-                }
-            }
-
-            Button {
-                onFollowUp()
-            } label: {
-                Label("Follow up", systemImage: "arrowshape.turn.up.left")
-            }
-
-            if let onDelete {
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Label("Xoá", systemImage: "trash")
-                }
-            }
-        }
+        modifier(
+            MessageActionsModifier(
+                speakText: speakText,
+                onCopy: onCopy,
+                onPickWords: onPickWords,
+                onLightPickWords: onLightPickWords,
+                onFollowUp: onFollowUp,
+                onDelete: onDelete
+            )
+        )
     }
 }
 

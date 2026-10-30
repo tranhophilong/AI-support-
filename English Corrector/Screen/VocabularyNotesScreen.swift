@@ -292,9 +292,17 @@ struct VocabularyNotesScreen: View {
 }
 
 private struct VocabularyRow: View {
+    @Environment(\.modelContext) private var context
+
     let item: VocabularyNoteModel
     let onLookup: () -> Void
     let onOpenConversation: (() -> Void)?
+
+    @State private var rowImages: [String] = []
+
+    private var displayedImages: [String] {
+        !item.imageURLs.isEmpty ? item.imageURLs : rowImages
+    }
 
     var body: some View {
         Button(action: onLookup) {
@@ -376,6 +384,22 @@ private struct VocabularyRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                if !displayedImages.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(displayedImages.prefix(5).enumerated()), id: \.offset) { _, urlString in
+                            VocabularyRemoteImageView(urlString: urlString, contentMode: .fill)
+                                .frame(width: 54, height: 54)
+                                .background(AppTheme.Surface.cardMuted)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.8)
+                                }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+
                 HStack(spacing: 10) {
                     if let sourceConversationTitle = item.sourceConversationTitle,
                        !sourceConversationTitle.isEmpty,
@@ -395,6 +419,18 @@ private struct VocabularyRow: View {
                     }
 
                     Spacer()
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.caption2)
+                        Text(displayedImages.isEmpty ? "Đang tải ảnh..." : "\(displayedImages.count) ảnh")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(AppTheme.Primary.p500)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppTheme.Primary.p50)
+                    .clipShape(Capsule())
 
                     HStack(spacing: 4) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
@@ -423,6 +459,23 @@ private struct VocabularyRow: View {
             .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 5)
         }
         .buttonStyle(.plain)
+        .task(id: item.word) {
+            guard item.imageURLs.isEmpty else { return }
+            if let cached = VocabularyImageCache.shared.get(word: item.word, mode: .realPhoto), !cached.isEmpty {
+                rowImages = cached
+                VocabularyNoteStore.updateImageURLs(for: item.word, imageURLs: cached, in: context)
+                return
+            }
+            if let fetched = try? await VocabularyImageSearchService.shared.fetchImages(
+                for: item.word,
+                mode: .realPhoto,
+                maxCount: 5
+            ), !fetched.isEmpty {
+                rowImages = fetched
+                VocabularyImageCache.shared.set(fetched, word: item.word, mode: .realPhoto)
+                VocabularyNoteStore.updateImageURLs(for: item.word, imageURLs: fetched, in: context)
+            }
+        }
     }
 }
 
@@ -444,6 +497,11 @@ private struct VocabularyDetailSheet: View {
     @State private var lookupResult: AIVocabularyLookupResponse?
     @State private var isLoading = false
     @State private var errorMessage: String?
+
+    @State private var imageURLs: [String] = []
+    @State private var isLoadingImages = false
+    @State private var imageSearchMode: VocabularyImageSearchMode = .realPhoto
+    @State private var selectedLightboxIndex: Int?
 
     private var savedNoteForCurrentWord: VocabularyNoteModel? {
         let normalized = currentWord.normalizedVocabularyWord
@@ -564,6 +622,9 @@ private struct VocabularyDetailSheet: View {
                             RoundedRectangle(cornerRadius: 16)
                                 .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
                         }
+
+                        // GOOGLE IMAGES CARD (4-5 IMAGES)
+                        googleImagesCard(for: spokenWord)
 
                         if isLoading {
                             VStack(spacing: 12) {
@@ -813,6 +874,7 @@ private struct VocabularyDetailSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         performLookup(for: currentWord, contextSentence: currentContext, forceRefresh: true)
+                        loadGoogleImages(for: currentWord, mode: imageSearchMode, forceRefresh: true)
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -821,14 +883,196 @@ private struct VocabularyDetailSheet: View {
                 }
             }
         }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { selectedLightboxIndex != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        selectedLightboxIndex = nil
+                    }
+                }
+            )
+        ) {
+            if let initialIndex = selectedLightboxIndex, !imageURLs.isEmpty {
+                VocabularyImageLightboxView(
+                    word: lookupResult?.word.isEmpty == false ? lookupResult!.word : currentWord,
+                    meaning: lookupResult?.vietnameseMeaning ?? savedNoteForCurrentWord?.vietnameseMeaning,
+                    imageURLs: imageURLs,
+                    initialIndex: initialIndex,
+                    googleImagesWebURL: VocabularyImageSearchService.shared.googleImagesWebURL(
+                        for: currentWord,
+                        mode: imageSearchMode
+                    ),
+                    onClose: {
+                        selectedLightboxIndex = nil
+                    }
+                )
+            }
+        }
         .onAppear {
             currentWord = initialTarget.word
             currentContext = initialTarget.contextSentence
             performLookup(for: initialTarget.word, contextSentence: initialTarget.contextSentence, forceRefresh: false)
+            loadGoogleImages(for: initialTarget.word, mode: imageSearchMode, forceRefresh: false)
         }
         .onDisappear {
             SpeechSynthesizerManager.shared.stop()
         }
+    }
+
+    @ViewBuilder
+    private func googleImagesCard(for word: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Label("Hình ảnh minh hoạ (Google)", systemImage: "photo.on.rectangle.angled")
+                    .font(.caption.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
+
+                Spacer()
+
+                Button {
+                    loadGoogleImages(for: word, mode: imageSearchMode, forceRefresh: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                        .padding(6)
+                        .background(AppTheme.Surface.cardMuted)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingImages)
+
+                if let webURL = VocabularyImageSearchService.shared.googleImagesWebURL(for: word, mode: imageSearchMode) {
+                    Link(destination: webURL) {
+                        HStack(spacing: 4) {
+                            Text("Google Images")
+                            Image(systemName: "arrow.up.right")
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.Primary.p500)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(AppTheme.Primary.p50)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+
+            // Mode Toggle: Ảnh thực tế vs Minh hoạ nghĩa
+            HStack(spacing: 8) {
+                ForEach(VocabularyImageSearchMode.allCases) { mode in
+                    let isSelected = (imageSearchMode == mode)
+                    Button {
+                        guard imageSearchMode != mode else { return }
+                        imageSearchMode = mode
+                        loadGoogleImages(for: word, mode: mode, forceRefresh: false)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: mode.icon)
+                                .font(.caption2)
+                            Text(mode.title)
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(isSelected ? .white : AppTheme.Neutral.n700)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(isSelected ? AppTheme.Primary.p500 : AppTheme.Surface.cardMuted)
+                        .clipShape(Capsule())
+                        .overlay {
+                            if !isSelected {
+                                Capsule()
+                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer()
+            }
+
+            if isLoadingImages {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AppTheme.Primary.p500)
+                    Text("Đang tổng hợp 4–5 hình ảnh từ Google...")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 26)
+            } else if imageURLs.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .foregroundStyle(AppTheme.Neutral.n400)
+                    Text("Chưa tải được hình ảnh. Bấm tải lại hoặc mở Google Images.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 18)
+            } else {
+                googleImagesGridView
+            }
+        }
+        .padding(16)
+        .background(AppTheme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+        }
+    }
+
+    @ViewBuilder
+    private var googleImagesGridView: some View {
+        let topImages = Array(imageURLs.prefix(2).enumerated())
+        let bottomImages = Array(imageURLs.dropFirst(2).prefix(3).enumerated())
+
+        VStack(spacing: 8) {
+            // Top Row: 2 larger images
+            HStack(spacing: 8) {
+                ForEach(topImages, id: \.offset) { idx, urlString in
+                    imageThumbnailButton(urlString: urlString, index: idx, height: 120)
+                }
+            }
+
+            // Bottom Row: 2-3 images
+            if !bottomImages.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(bottomImages, id: \.offset) { offset, urlString in
+                        imageThumbnailButton(urlString: urlString, index: offset + 2, height: 96)
+                    }
+                }
+            }
+
+            Text("Chạm vào ảnh bất kỳ để phóng to")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.Neutral.n400)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private func imageThumbnailButton(urlString: String, index: Int, height: CGFloat) -> some View {
+        Button {
+            selectedLightboxIndex = index
+        } label: {
+            GeometryReader { geo in
+                VocabularyRemoteImageView(urlString: urlString, contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func chatTopicsCard(topics: [VocabularyChatTopicSuggestion], lookup: AIVocabularyLookupResponse) -> some View {
@@ -954,6 +1198,7 @@ private struct VocabularyDetailSheet: View {
         currentWord = trimmed
         currentContext = nil
         performLookup(for: trimmed, contextSentence: nil, forceRefresh: false)
+        loadGoogleImages(for: trimmed, mode: imageSearchMode, forceRefresh: false)
     }
 
     private func goBackToPreviousWord() {
@@ -961,6 +1206,7 @@ private struct VocabularyDetailSheet: View {
         currentWord = previous
         currentContext = wordHistory.isEmpty ? initialTarget.contextSentence : nil
         performLookup(for: previous, contextSentence: currentContext, forceRefresh: false)
+        loadGoogleImages(for: previous, mode: imageSearchMode, forceRefresh: false)
     }
 
     private func saveCurrentLookup(_ lookup: AIVocabularyLookupResponse) {
@@ -969,10 +1215,57 @@ private struct VocabularyDetailSheet: View {
                 word: currentWord,
                 lookup: lookup,
                 sourceText: currentContext,
+                imageURLs: imageURLs.isEmpty ? nil : imageURLs,
                 in: context
             )
         } catch {
             print("DEBUG: Failed to save vocabulary lookup result: \(error)")
+        }
+    }
+
+    private func loadGoogleImages(
+        for word: String,
+        mode: VocabularyImageSearchMode,
+        forceRefresh: Bool
+    ) {
+        let normalized = word.normalizedVocabularyWord
+        guard !normalized.isEmpty else { return }
+
+        if !forceRefresh {
+            if let memCached = VocabularyImageCache.shared.get(word: word, mode: mode), !memCached.isEmpty {
+                imageURLs = memCached
+                return
+            }
+            if mode == .realPhoto,
+               let existing = savedWords.first(where: { $0.normalizedWord == normalized }),
+               !existing.imageURLs.isEmpty {
+                imageURLs = existing.imageURLs
+                VocabularyImageCache.shared.set(existing.imageURLs, word: word, mode: mode)
+                return
+            }
+        }
+
+        isLoadingImages = true
+        Task {
+            let fetched = (try? await VocabularyImageSearchService.shared.fetchImages(
+                for: word,
+                mode: mode,
+                maxCount: 5
+            )) ?? []
+
+            await MainActor.run {
+                guard currentWord.normalizedVocabularyWord == normalized,
+                      imageSearchMode == mode else {
+                    return
+                }
+                imageURLs = fetched
+                isLoadingImages = false
+
+                if !fetched.isEmpty {
+                    VocabularyImageCache.shared.set(fetched, word: word, mode: mode)
+                    VocabularyNoteStore.updateImageURLs(for: word, imageURLs: fetched, in: context)
+                }
+            }
         }
     }
 
@@ -1015,6 +1308,116 @@ private struct VocabularyDetailSheet: View {
                     isLoading = false
                 }
             }
+        }
+    }
+}
+
+private struct VocabularyImageLightboxView: View {
+    let word: String
+    let meaning: String?
+    let imageURLs: [String]
+    let initialIndex: Int
+    let googleImagesWebURL: URL?
+    let onClose: () -> Void
+
+    @State private var currentIndex: Int = 0
+    @State private var zoomScale: CGFloat = 1.0
+
+    var body: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+
+            TabView(selection: $currentIndex) {
+                ForEach(Array(imageURLs.enumerated()), id: \.offset) { idx, urlString in
+                    ZStack {
+                        VocabularyRemoteImageView(urlString: urlString, contentMode: .fit)
+                            .scaleEffect(currentIndex == idx ? zoomScale : 1.0)
+                            .gesture(
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        zoomScale = min(max(value, 1.0), 3.0)
+                                    }
+                                    .onEnded { _ in
+                                        withAnimation(.spring()) {
+                                            zoomScale = 1.0
+                                        }
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                withAnimation(.spring()) {
+                                    zoomScale = zoomScale > 1.0 ? 1.0 : 2.0
+                                }
+                            }
+                    }
+                    .padding(.horizontal, 12)
+                    .tag(idx)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .onChange(of: currentIndex) { _, _ in
+                zoomScale = 1.0
+            }
+
+            VStack {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(word)
+                            .font(.headline.bold())
+                            .foregroundStyle(.white)
+
+                        if let meaning, !meaning.isEmpty {
+                            Text(meaning)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
+                    if let googleImagesWebURL {
+                        Link(destination: googleImagesWebURL) {
+                            HStack(spacing: 4) {
+                                Text("Mở Google")
+                                Image(systemName: "arrow.up.right")
+                            }
+                            .font(.caption.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.white.opacity(0.18))
+                            .clipShape(Capsule())
+                        }
+                    }
+
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(.white.opacity(0.22))
+                            .clipShape(Circle())
+                            .frame(width: 60, height: 60)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Đóng xem ảnh")
+                }
+                .padding(.leading, 18)
+                .padding(.trailing, 8)
+                .padding(.top, 8)
+
+                Spacer()
+
+                Text("Ảnh \(currentIndex + 1) / \(imageURLs.count) • Chạm đúp để phóng to")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.bottom, 28)
+            }
+        }
+        .onAppear {
+            currentIndex = min(max(initialIndex, 0), max(imageURLs.count - 1, 0))
         }
     }
 }

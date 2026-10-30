@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" fill="none">
+  <!-- Bong bóng nền phía sau -->
+  <path d="M14 10H38C41.3137 10 44 12.6863 44 16V30C44 33.3137 41.3137 36 38 36H32L24 43V36H14C10.6863 36 8 33.3137 8 30V16C8 12.6863 10.6863 10 14 10Z" fill="#4F46E5" />
+
+  <!-- Khung nội dung sáng bên trong -->
+  <rect x="11" y="13" width="30" height="20" rx="4" fill="#EEF2FF" />
+
+  <!-- Biểu tượng bóng đèn / Tình huống gợi ý -->
+  <circle cx="22" cy="22" r="6" fill="#F59E0B" />
+  <path d="M20 27H24V29C24 29.5523 23.5523 30 23 30H21C20.4477 30 20 29.5523 20 29V27Z" fill="#1E293B" />
+  <!-- Dấu hỏi thông minh bên trong -->
+  <path d="M20.6 20.6C20.6 19.7 21.3 19 22.2 19C23.1 19 23.8 19.7 23.8 20.5C23.8 21.1 23.4 21.5 22.9 21.8C22.4 22.1 22.2 22.4 22.2 23" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" />
+  <circle cx="22.2" cy="24.8" r="0.9" fill="#FFFFFF" />
+
+  <!-- Các dòng gợi ý cách nói -->
+  <rect x="30" y="18" width="8" height="2.5" rx="1.25" fill="#4F46E5" />
+  <rect x="30" y="23" width="6" height="2.5" rx="1.25" fill="#818CF8" />
+
+  <!-- Ngôi sao AI Sparkle -->
+  <path d="M39 5L40.1 8.4L43.5 9.5L40.1 10.6L39 14L37.9 10.6L34.5 9.5L37.9 8.4L39 5Z" fill="#F59E0B" />
+</svg>

@@ -8,11 +8,172 @@
 import SwiftUI
 import SwiftData
 
+struct ConversationDeepLinkDestination: Hashable {
+    let conversation: ConversationModel
+    var highlightedWord: String? = nil
+    var highlightedSourceText: String? = nil
+    var highlightedMessageID: UUID? = nil
+}
+
+enum NoteConversationResolver {
+    static func resolve(
+        conversations: [ConversationModel],
+        conversationID: UUID?,
+        messageID: UUID?,
+        noteText: String,
+        originalContext: String,
+        originalText: String
+    ) -> (conversation: ConversationModel, messageID: UUID?, highlightedSourceText: String?)? {
+        let trimmedNote = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedContext = originalContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedOriginal = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveSourceText = !trimmedNote.isEmpty ? trimmedNote : (!trimmedContext.isEmpty ? trimmedContext : nil)
+
+        // 1. Direct match by conversationID
+        if let conversationID,
+           let conv = conversations.first(where: { $0.id == conversationID }) {
+            let matchedMsg = findMatchingMessage(
+                in: conv,
+                messageID: messageID,
+                noteText: trimmedNote,
+                contextText: trimmedContext,
+                originalText: trimmedOriginal
+            )
+            return (conv, matchedMsg?.id ?? messageID, effectiveSourceText)
+        }
+
+        // 2. Match by messageID across all conversations
+        if let messageID {
+            for conv in conversations {
+                if let matched = conv.messages.first(where: { $0.id == messageID }) {
+                    return (conv, matched.id, effectiveSourceText)
+                }
+            }
+        }
+
+        // 3. Match by noteText across all conversations (exact candidate match first, then substring match)
+        if !trimmedNote.isEmpty {
+            for conv in conversations {
+                if let matched = findMessageMatchingText(in: conv, query: trimmedNote, exactOnly: true) {
+                    return (conv, matched.id, effectiveSourceText)
+                }
+            }
+            for conv in conversations {
+                if let matched = findMessageMatchingText(in: conv, query: trimmedNote, exactOnly: false) {
+                    return (conv, matched.id, effectiveSourceText)
+                }
+            }
+        }
+
+        // 4. Match by originalContext across all conversations
+        if !trimmedContext.isEmpty {
+            for conv in conversations {
+                if let matched = findMessageMatchingText(in: conv, query: trimmedContext, exactOnly: false) {
+                    return (conv, matched.id, effectiveSourceText)
+                }
+            }
+        }
+
+        // 5. Match by originalText (user message) across all conversations
+        if !trimmedOriginal.isEmpty {
+            for conv in conversations {
+                let sorted = conv.messages.sorted(by: { $0.createdAt < $1.createdAt })
+                if let userIdx = sorted.firstIndex(where: {
+                    $0.isUser && $0.text.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(trimmedOriginal) == .orderedSame
+                }) {
+                    // Prefer the AI response right after the user message if available
+                    if userIdx + 1 < sorted.count, !sorted[userIdx + 1].isUser {
+                        return (conv, sorted[userIdx + 1].id, effectiveSourceText)
+                    }
+                    return (conv, sorted[userIdx].id, effectiveSourceText)
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func findMatchingMessage(
+        in conv: ConversationModel,
+        messageID: UUID?,
+        noteText: String,
+        contextText: String,
+        originalText: String
+    ) -> MessageModel? {
+        if let messageID,
+           let matched = conv.messages.first(where: { $0.id == messageID }) {
+            return matched
+        }
+        if !noteText.isEmpty {
+            if let exact = findMessageMatchingText(in: conv, query: noteText, exactOnly: true) {
+                return exact
+            }
+            if let partial = findMessageMatchingText(in: conv, query: noteText, exactOnly: false) {
+                return partial
+            }
+        }
+        if !contextText.isEmpty,
+           let matched = findMessageMatchingText(in: conv, query: contextText, exactOnly: false) {
+            return matched
+        }
+        if !originalText.isEmpty,
+           let matched = findMessageMatchingText(in: conv, query: originalText, exactOnly: false) {
+            return matched
+        }
+        return nil
+    }
+
+    private static func findMessageMatchingText(
+        in conv: ConversationModel,
+        query: String,
+        exactOnly: Bool
+    ) -> MessageModel? {
+        let lowerQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowerQuery.isEmpty else { return nil }
+
+        let sorted = conv.messages.sorted(by: { $0.createdAt < $1.createdAt })
+        for msg in sorted {
+            var candidates: [String] = [
+                msg.fixed ?? "",
+                msg.natural ?? "",
+                msg.followUpQuestion ?? "",
+                msg.text
+            ]
+            if let alt = msg.alternativeExpressions {
+                candidates.append(contentsOf: alt)
+            }
+            if let exp = msg.explanations {
+                candidates.append(contentsOf: exp)
+            }
+            if let replies = msg.suggestedReplies {
+                candidates.append(contentsOf: replies)
+            }
+
+            let hit = candidates.contains { candidate in
+                let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !trimmed.isEmpty else { return false }
+                if exactOnly {
+                    return trimmed == lowerQuery
+                } else {
+                    return trimmed == lowerQuery || trimmed.contains(lowerQuery) || lowerQuery.contains(trimmed)
+                }
+            }
+            if hit {
+                return msg
+            }
+        }
+        return nil
+    }
+}
+
 struct ListConversationScreen: View {
 
     @Environment(\.modelContext) private var context
 
     @Query(sort: \ConversationModel.createdAt, order: .reverse) private var conversations: [ConversationModel]
+    @Query private var savedNotes: [SavedNoteModel]
+
+    @ObservedObject private var coordinator = StructureNavigationCoordinator.shared
 
     @AppStorage("hasSeenWidgetOnboarding") private var hasSeenWidgetOnboarding = false
     @AppStorage("appThemeMode") private var appThemeModeRawValue = AppThemeMode.light.rawValue
@@ -166,6 +327,14 @@ struct ListConversationScreen: View {
 
                 ChatScreen(conversation: conversation)
             }
+            .navigationDestination(for: ConversationDeepLinkDestination.self) { destination in
+                ChatScreen(
+                    conversation: destination.conversation,
+                    highlightedWord: destination.highlightedWord,
+                    highlightedSourceText: destination.highlightedSourceText,
+                    highlightedMessageID: destination.highlightedMessageID
+                )
+            }
             .navigationDestination(isPresented: $showNotedAIScreen) {
                 NotedAIScreen()
             }
@@ -190,7 +359,61 @@ struct ListConversationScreen: View {
             .onAppear {
                 print("DEBUG: Conversations loaded: \(conversations.count)")
                 showWidgetOnboardingIfNeeded()
+                handlePendingConversationNavigation()
             }
+            .onChange(of: coordinator.pendingConversationNavigation) { _, _ in
+                handlePendingConversationNavigation()
+            }
+            .onChange(of: conversations.count) { _, _ in
+                handlePendingConversationNavigation()
+            }
+        }
+    }
+
+    @MainActor
+    private func handlePendingConversationNavigation() {
+        guard let target = coordinator.pendingConversationNavigation else { return }
+        guard !conversations.isEmpty else { return }
+
+        let matchedNote = savedNotes.first(where: { $0.id == target.noteID })
+            ?? savedNotes.first(where: { !target.noteText.isEmpty && $0.text == target.noteText })
+
+        let convID = target.conversationID ?? matchedNote?.sourceConversationID
+        let msgID = target.messageID ?? matchedNote?.sourceMessageID
+        let noteText = !target.noteText.isEmpty ? target.noteText : (matchedNote?.text ?? "")
+        let contextText = !target.originalContext.isEmpty ? target.originalContext : (matchedNote?.originalContext ?? "")
+        let originalText = !target.originalText.isEmpty ? target.originalText : (matchedNote?.originalText ?? "")
+
+        coordinator.pendingConversationNavigation = nil
+
+        if let resolved = NoteConversationResolver.resolve(
+            conversations: conversations,
+            conversationID: convID,
+            messageID: msgID,
+            noteText: noteText,
+            originalContext: contextText,
+            originalText: originalText
+        ) {
+            if let matchedNote, matchedNote.sourceConversationID == nil {
+                matchedNote.sourceConversationID = resolved.conversation.id
+                matchedNote.sourceMessageID = resolved.messageID
+                matchedNote.sourceConversationTitle = resolved.conversation.title
+                try? context.save()
+            }
+
+            let destination = ConversationDeepLinkDestination(
+                conversation: resolved.conversation,
+                highlightedWord: nil,
+                highlightedSourceText: resolved.highlightedSourceText,
+                highlightedMessageID: resolved.messageID
+            )
+            path = NavigationPath()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                path.append(destination)
+            }
+        } else {
+            // Fallback to Notes tab if the source conversation was deleted
+            coordinator.selectedTab = .notes
         }
     }
 

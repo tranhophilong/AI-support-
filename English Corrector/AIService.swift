@@ -24,6 +24,10 @@ protocol EnglishCorrectionAIProvider {
         context: String,
         lastQuestion: String?
     ) async throws -> [String]
+
+    func summarizeUserMistakes(
+        samples: [UserMistakeSample]
+    ) async throws -> AIMistakeSummaryResponse
 }
 
 final class AIService {
@@ -56,6 +60,12 @@ final class AIService {
             context: context,
             lastQuestion: lastQuestion
         )
+    }
+
+    func summarizeUserMistakes(
+        samples: [UserMistakeSample]
+    ) async throws -> AIMistakeSummaryResponse {
+        try await provider.summarizeUserMistakes(samples: samples)
     }
 }
 
@@ -131,11 +141,12 @@ struct EnglishCorrectionPrompt {
 
         Your tasks:
         - Fix grammar mistakes in "fixed"
-        - Rewrite the user's sentence like a native speaker in "natural", suggesting alternative natural ways to say it (e.g., if the user says "Hello", suggest natural alternatives like "Hi! / Hey there! / How's it going?")
+        - Rewrite the user's sentence like a native speaker in "natural" (1 best natural sentence)
+        - Provide "alternativeExpressions": 2 to 3 other natural ways to express the same meaning in different tones/contexts (e.g. casual, polite/formal, or idiomatic native expressions)
         - Keep original meaning
         - In "explanations", ALWAYS include:
           1. Simple, friendly explanations of any grammar or word-choice corrections
-          2. Suggestions for alternative words, synonyms, or other natural ways to express the user's sentence (e.g., suggesting "Hi", "Hey", or "What's up?" as casual alternatives to "Hello"), even when the user's sentence has no grammar mistakes
+          2. Brief notes on nuance or vocabulary usage
         - For each explanation, provide an "explanation_noted" field with the specific suggested words, phrases, or grammatical terms that should be highlighted (e.g., "Hi", "Hey there", "past tense", "grammar").
         - Provide a "followUpQuestion": 1 friendly, natural English follow-up question that continues the conversation based on the user's sentence and recent conversation history.
         - Provide "suggestedReplies": 2 to 3 natural English reply sentences that the user could use or adapt to answer your followUpQuestion.
@@ -372,6 +383,115 @@ final class GeminiAIProvider: EnglishCorrectionAIProvider {
 
         return try AINextWordSuggestionResponse.decodeFromAIContent(content).suggestions
     }
+
+    func summarizeUserMistakes(
+        samples: [UserMistakeSample]
+    ) async throws -> AIMistakeSummaryResponse {
+        guard !apiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey(
+                provider: name,
+                keyName: "GEMINI_API_KEY"
+            )
+        }
+
+        let prompt = MistakeSummaryPrompt(samples: samples)
+
+        let body = GeminiGenerateContentRequest(
+            systemInstruction: GeminiContent(
+                parts: [GeminiPart(text: prompt.system)]
+            ),
+            contents: [
+                GeminiContent(
+                    parts: [GeminiPart(text: prompt.user)]
+                )
+            ],
+            generationConfig: GeminiGenerationConfig(
+                responseMimeType: "application/json",
+                responseSchema: Self.mistakeSummarySchema
+            )
+        )
+
+        guard let endpoint = URL(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"
+        ) else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw AIServiceError.requestFailed(
+                provider: name,
+                statusCode: httpResponse.statusCode,
+                message: String(data: data, encoding: .utf8)
+            )
+        }
+
+        let responseBody = try JSONDecoder()
+            .decode(GeminiGenerateContentResponse.self, from: data)
+
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(provider: name, message: error.message)
+        }
+
+        guard let content = responseBody.candidates?
+            .first?
+            .content?
+            .parts
+            .first?
+            .text else {
+            throw AIServiceError.emptyResponse(provider: name)
+        }
+
+        return try AIMistakeSummaryResponse.decodeFromAIContent(content)
+    }
+}
+
+struct MistakeSummaryPrompt {
+    let system: String
+    let user: String
+
+    init(samples: [UserMistakeSample]) {
+        system = """
+        You are a personalized English learning coach for a Vietnamese user.
+        Analyze the provided history of the user's English mistakes (from their conversations and saved notes) and synthesize a comprehensive, encouraging, and actionable mistake summary in Vietnamese.
+
+        Provide:
+        - "overallAssessment": 2 to 3 sentences in Vietnamese summarizing the user's current English habits, strengths, and the main patterns of mistakes they make.
+        - "topPriorityFocus": 1 concise, impactful sentence in Vietnamese highlighting the #1 thing the user should focus on improving right now (suitable for a daily reminder headline).
+        - "actionableGoals": 3 to 4 short, specific daily practice reminders in Vietnamese (e.g. "Kiểm tra thì quá khứ đơn khi kể chuyện đã xảy ra", "Chú ý giới từ đi kèm sau tính từ").
+        - "categories": Group the user's mistakes into 2 to 5 clear categories (e.g. "Thì động từ (Verb Tenses)", "Giới từ & Cụm từ (Prepositions & Collocations)", "Cấu trúc câu (Sentence Structure)", "Cách diễn đạt tự nhiên (Natural Phrasing)").
+          For each category, provide:
+          1. "categoryName": Vietnamese + English name of the category.
+          2. "severity": Must be one of: "Cao", "Trung bình", "Cần lưu ý".
+          3. "frequencyCount": Number of times this type of mistake appeared in the samples.
+          4. "whatToImprove": Detailed Vietnamese explanation of what mistake the user repeatedly makes in this category and how to fix it.
+          5. "quickRule": A short, memorable rule or formula in Vietnamese/English (1 line) ideal for a push notification reminder.
+          6. "examples": 1 to 3 real examples taken directly from the user's samples (keep "wrongSentence" and "correctSentence" faithful to the user's actual sentences so the app can link back to the original conversation, plus a short Vietnamese "explanation").
+        """
+
+        let formattedSamples = samples.enumerated().map { idx, item in
+            """
+            [\(idx + 1)] Source: \(item.source)
+            - User original: \(item.userOriginal.isEmpty ? "(N/A)" : item.userOriginal)
+            - Corrected / Target: \(item.correctedSentence)
+            - Note / Explanation: \(item.explanation)
+            """
+        }.joined(separator: "\n\n")
+
+        user = """
+        Here are the user's recent English correction records and saved notes:
+
+        \(formattedSamples)
+        """
+    }
 }
 
 final class GroqAIProvider: EnglishCorrectionAIProvider {
@@ -542,6 +662,67 @@ final class GroqAIProvider: EnglishCorrectionAIProvider {
 
         return try AINextWordSuggestionResponse.decodeFromAIContent(content).suggestions
     }
+
+    func summarizeUserMistakes(
+        samples: [UserMistakeSample]
+    ) async throws -> AIMistakeSummaryResponse {
+        guard !apiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey(
+                provider: name,
+                keyName: "GROQ_API_KEY"
+            )
+        }
+
+        let prompt = MistakeSummaryPrompt(samples: samples)
+
+        let body = GroqChatCompletionRequest(
+            model: model,
+            messages: [
+                GroqMessage(
+                    role: "system",
+                    content: prompt.system + "\n\n" + Self.mistakeSummaryJsonInstruction
+                ),
+                GroqMessage(
+                    role: "user",
+                    content: prompt.user
+                )
+            ],
+            temperature: 0.25
+        )
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw AIServiceError.requestFailed(
+                provider: name,
+                statusCode: httpResponse.statusCode,
+                message: String(data: data, encoding: .utf8)
+            )
+        }
+
+        let responseBody = try JSONDecoder()
+            .decode(GroqChatCompletionResponse.self, from: data)
+
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(provider: name, message: error.message)
+        }
+
+        guard let content = responseBody.choices?
+            .first?
+            .message
+            .content else {
+            throw AIServiceError.emptyResponse(provider: name)
+        }
+
+        return try AIMistakeSummaryResponse.decodeFromAIContent(content)
+    }
 }
 
 private extension GroqAIProvider {
@@ -552,10 +733,15 @@ private extension GroqAIProvider {
     JSON shape:
     {
       "fixed": "Corrected sentence",
-      "natural": "More natural or alternative ways to say the sentence (e.g. 'Hi! / Hey, how's it going?')",
+      "natural": "Best natural way to say the sentence",
+      "alternativeExpressions": [
+        "Another natural way to say it (casual)",
+        "Another way to say it (polite / formal)",
+        "Idiomatic or native expression with the same meaning"
+      ],
       "explanations": [
         {
-          "text": "Simple explanation of grammar correction OR suggestion of alternative ways to say it (e.g. You can also say 'Hi' or 'Hey' in casual conversation)",
+          "text": "Simple explanation of grammar correction OR suggestion of alternative ways to say it",
           "explanation_noted": "suggested alternative word or grammar keyword to highlight"
         }
       ],
@@ -589,9 +775,99 @@ private extension GroqAIProvider {
       ]
     }
     """
+
+    static let mistakeSummaryJsonInstruction = """
+    Return ONLY valid JSON, without Markdown code fences or extra text.
+
+    JSON shape:
+    {
+      "overallAssessment": "Nhận xét tổng quan 2-3 câu bằng tiếng Việt về điểm mạnh và các lỗi thường gặp của bạn.",
+      "topPriorityFocus": "1 câu ngắn gọn nêu mục tiêu quan trọng nhất cần cải thiện ngay.",
+      "actionableGoals": [
+        "Mục tiêu rèn luyện hằng ngày 1",
+        "Mục tiêu rèn luyện hằng ngày 2",
+        "Mục tiêu rèn luyện hằng ngày 3"
+      ],
+      "categories": [
+        {
+          "categoryName": "Thì động từ (Verb Tenses)",
+          "severity": "Cao",
+          "frequencyCount": 4,
+          "whatToImprove": "Giải thích chi tiết bằng tiếng Việt lỗi người dùng hay mắc và cách khắc phục.",
+          "quickRule": "Quy tắc ghi nhớ ngắn gọn 1 dòng dùng cho thông báo nhắc nhở.",
+          "examples": [
+            {
+              "wrongSentence": "Exact wrong user sentence",
+              "correctSentence": "Exact corrected sentence",
+              "explanation": "Giải thích ngắn gọn bằng tiếng Việt"
+            }
+          ]
+        }
+      ]
+    }
+    """
 }
 
 private extension GeminiAIProvider {
+
+    static let mistakeSummarySchema = GeminiSchema(
+        type: "object",
+        required: [
+            "overallAssessment",
+            "topPriorityFocus",
+            "actionableGoals",
+            "categories"
+        ],
+        properties: [
+            "overallAssessment": GeminiSchemaProperty(
+                type: "string",
+                description: "2 to 3 sentences in Vietnamese summarizing the user's current habits, strengths, and mistake patterns."
+            ),
+            "topPriorityFocus": GeminiSchemaProperty(
+                type: "string",
+                description: "1 concise sentence in Vietnamese stating the #1 priority area to improve."
+            ),
+            "actionableGoals": GeminiSchemaProperty(
+                type: "array",
+                description: "3 to 4 actionable daily practice tips in Vietnamese.",
+                items: GeminiSchemaProperty(type: "string")
+            ),
+            "categories": GeminiSchemaProperty(
+                type: "array",
+                description: "2 to 5 categorized mistake groups.",
+                items: GeminiSchemaProperty(
+                    type: "object",
+                    properties: [
+                        "categoryName": GeminiSchemaProperty(type: "string"),
+                        "severity": GeminiSchemaProperty(type: "string"),
+                        "frequencyCount": GeminiSchemaProperty(type: "integer"),
+                        "whatToImprove": GeminiSchemaProperty(type: "string"),
+                        "quickRule": GeminiSchemaProperty(type: "string"),
+                        "examples": GeminiSchemaProperty(
+                            type: "array",
+                            items: GeminiSchemaProperty(
+                                type: "object",
+                                properties: [
+                                    "wrongSentence": GeminiSchemaProperty(type: "string"),
+                                    "correctSentence": GeminiSchemaProperty(type: "string"),
+                                    "explanation": GeminiSchemaProperty(type: "string")
+                                ],
+                                required: ["wrongSentence", "correctSentence", "explanation"]
+                            )
+                        )
+                    ],
+                    required: [
+                        "categoryName",
+                        "severity",
+                        "frequencyCount",
+                        "whatToImprove",
+                        "quickRule",
+                        "examples"
+                    ]
+                )
+            )
+        ]
+    )
 
     static let nextWordSchema = GeminiSchema(
         type: "object",
@@ -610,6 +886,7 @@ private extension GeminiAIProvider {
         required: [
             "fixed",
             "natural",
+            "alternativeExpressions",
             "explanations",
             "corrections",
             "followUpQuestion",
@@ -624,7 +901,12 @@ private extension GeminiAIProvider {
             ),
             "natural": GeminiSchemaProperty(
                 type: "string",
-                description: "A natural conversational version and alternative ways to say the user's sentence."
+                description: "The single most natural conversational version of the user's sentence."
+            ),
+            "alternativeExpressions": GeminiSchemaProperty(
+                type: "array",
+                description: "2 to 3 other natural ways to express the user's sentence in different tones or contexts.",
+                items: GeminiSchemaProperty(type: "string")
             ),
             "explanations": GeminiSchemaProperty(
                 type: "array",
@@ -829,6 +1111,21 @@ private extension AINextWordSuggestionResponse {
 
         return try JSONDecoder()
             .decode(AINextWordSuggestionResponse.self, from: jsonData)
+    }
+}
+
+private extension AIMistakeSummaryResponse {
+
+    static func decodeFromAIContent(_ content: String) throws -> AIMistakeSummaryResponse {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let jsonString = AICorrectionResponse.strippedMarkdownFence(from: trimmedContent)
+
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        return try JSONDecoder()
+            .decode(AIMistakeSummaryResponse.self, from: jsonData)
     }
 }
 

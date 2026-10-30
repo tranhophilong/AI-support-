@@ -12,6 +12,31 @@ protocol VocabularyLookupAIProvider {
         word: String,
         context: String?
     ) async throws -> AIVocabularyLookupResponse
+
+    func quickLookupWord(
+        word: String,
+        sentence: String
+    ) async throws -> AIQuickWordLookupResponse
+}
+
+@MainActor
+final class QuickWordLookupCache {
+    static let shared = QuickWordLookupCache()
+    private var storage: [String: AIQuickWordLookupResponse] = [:]
+
+    private init() {}
+
+    private func makeKey(word: String, sentence: String) -> String {
+        "\(word.normalizedVocabularyWord)|\(sentence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+
+    func get(word: String, sentence: String) -> AIQuickWordLookupResponse? {
+        storage[makeKey(word: word, sentence: sentence)]
+    }
+
+    func set(_ response: AIQuickWordLookupResponse, word: String, sentence: String) {
+        storage[makeKey(word: word, sentence: sentence)] = response
+    }
 }
 
 final class VocabularyAIService {
@@ -29,6 +54,16 @@ final class VocabularyAIService {
         try await provider.lookupWord(
             word: word,
             context: context
+        )
+    }
+
+    func quickLookupWord(
+        word: String,
+        sentence: String
+    ) async throws -> AIQuickWordLookupResponse {
+        try await provider.quickLookupWord(
+            word: word,
+            sentence: sentence
         )
     }
 }
@@ -83,6 +118,31 @@ struct VocabularyLookupPrompt {
             \(trimmedContext)
             """
         }
+    }
+}
+
+struct QuickWordLookupPrompt {
+
+    let system: String
+    let user: String
+
+    init(word: String, sentence: String) {
+        system = """
+        You are an English-Vietnamese dictionary and syntax coach.
+        Given a tapped English word and the exact sentence where it appears, provide a fast, concise breakdown in Vietnamese:
+        - "word": the exact word as it appears (without punctuation)
+        - "baseForm": the dictionary base form / lemma of the word
+        - "phonetic": IPA pronunciation (e.g. "/rɪˌkəˈmend/")
+        - "partOfSpeech": short part of speech in this sentence (e.g. "verb", "noun", "adjective", "adverb", "preposition", "conjunction")
+        - "contextualMeaning": concise Vietnamese meaning of this word specifically in the context of the sentence (1 short line)
+        - "grammarRoleInSentence": concise Vietnamese explanation (1 to 2 sentences) of what grammatical role this word plays in the sentence (e.g. "Động từ chính chia ở quá khứ đơn trong mệnh đề quan hệ bổ nghĩa cho 'The book'", or "Trạng từ bổ nghĩa cho động từ 'changed', đứng giữa has và V3/ed")
+        - "structurePattern": if the word is part of a notable collocation, phrasal verb, or grammar pattern in this sentence, write that pattern (e.g. "recommend something to someone", "perspective on + N", "take a rain check"); otherwise return ""
+        """
+
+        user = """
+        Tapped word: "\(word)"
+        Full sentence: "\(sentence)"
+        """
     }
 }
 
@@ -177,6 +237,102 @@ final class GeminiVocabularyAIProvider: VocabularyLookupAIProvider {
 
         return try AIVocabularyLookupResponse.decodeFromAIContent(content)
     }
+
+    func quickLookupWord(
+        word: String,
+        sentence: String
+    ) async throws -> AIQuickWordLookupResponse {
+
+        guard !apiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey(
+                provider: name,
+                keyName: "GEMINI_API_KEY"
+            )
+        }
+
+        let prompt = QuickWordLookupPrompt(word: word, sentence: sentence)
+
+        let body = GeminiGenerateContentRequest(
+            systemInstruction: GeminiContent(
+                parts: [GeminiPart(text: prompt.system)]
+            ),
+            contents: [
+                GeminiContent(
+                    parts: [GeminiPart(text: prompt.user)]
+                )
+            ],
+            generationConfig: GeminiGenerationConfig(
+                responseMimeType: "application/json",
+                responseSchema: Self.quickLookupSchema
+            )
+        )
+
+        guard let endpoint = URL(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"
+        ) else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw AIServiceError.requestFailed(
+                provider: name,
+                statusCode: httpResponse.statusCode,
+                message: String(data: data, encoding: .utf8)
+            )
+        }
+
+        let responseBody = try JSONDecoder()
+            .decode(GeminiGenerateContentResponse.self, from: data)
+
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(
+                provider: name,
+                message: error.message
+            )
+        }
+
+        guard let content = responseBody.candidates?
+            .first?
+            .content?
+            .parts
+            .first?
+            .text else {
+            throw AIServiceError.emptyResponse(provider: name)
+        }
+
+        return try AIQuickWordLookupResponse.decodeFromAIContent(content)
+    }
+
+    private static let quickLookupSchema = GeminiSchema(
+        type: "object",
+        required: [
+            "word",
+            "baseForm",
+            "phonetic",
+            "partOfSpeech",
+            "contextualMeaning",
+            "grammarRoleInSentence",
+            "structurePattern"
+        ],
+        properties: [
+            "word": GeminiSchemaProperty(type: "string"),
+            "baseForm": GeminiSchemaProperty(type: "string"),
+            "phonetic": GeminiSchemaProperty(type: "string"),
+            "partOfSpeech": GeminiSchemaProperty(type: "string"),
+            "contextualMeaning": GeminiSchemaProperty(type: "string"),
+            "grammarRoleInSentence": GeminiSchemaProperty(type: "string"),
+            "structurePattern": GeminiSchemaProperty(type: "string")
+        ]
+    )
 
     private static let responseSchema = GeminiSchema(
         type: "object",
@@ -337,6 +493,87 @@ final class GroqVocabularyAIProvider: VocabularyLookupAIProvider {
         return try AIVocabularyLookupResponse.decodeFromAIContent(content)
     }
 
+    func quickLookupWord(
+        word: String,
+        sentence: String
+    ) async throws -> AIQuickWordLookupResponse {
+
+        guard !apiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey(
+                provider: name,
+                keyName: "GROQ_API_KEY"
+            )
+        }
+
+        let prompt = QuickWordLookupPrompt(word: word, sentence: sentence)
+
+        let body = GroqChatCompletionRequest(
+            model: model,
+            messages: [
+                GroqMessage(
+                    role: "system",
+                    content: prompt.system + "\n\n" + Self.quickJsonInstruction
+                ),
+                GroqMessage(
+                    role: "user",
+                    content: prompt.user
+                )
+            ],
+            temperature: 0.2
+        )
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw AIServiceError.requestFailed(
+                provider: name,
+                statusCode: httpResponse.statusCode,
+                message: String(data: data, encoding: .utf8)
+            )
+        }
+
+        let responseBody = try JSONDecoder()
+            .decode(GroqChatCompletionResponse.self, from: data)
+
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(
+                provider: name,
+                message: error.message
+            )
+        }
+
+        guard let content = responseBody.choices?
+            .first?
+            .message
+            .content else {
+            throw AIServiceError.emptyResponse(provider: name)
+        }
+
+        return try AIQuickWordLookupResponse.decodeFromAIContent(content)
+    }
+
+    private static let quickJsonInstruction = """
+    Return ONLY valid JSON, without Markdown code fences or extra text.
+
+    JSON shape:
+    {
+      "word": "recommended",
+      "baseForm": "recommend",
+      "phonetic": "/ˌrek.əˈmend/",
+      "partOfSpeech": "verb",
+      "contextualMeaning": "giới thiệu, khuyên dùng",
+      "grammarRoleInSentence": "Động từ chính chia ở thì quá khứ đơn (V2/ed) trong mệnh đề quan hệ 'that you recommended yesterday' bổ nghĩa cho danh từ 'The book'.",
+      "structurePattern": "recommend something (to someone)"
+    }
+    """
+
     private static let jsonInstruction = """
     Return ONLY valid JSON, without Markdown code fences or extra text.
 
@@ -398,5 +635,20 @@ private extension AIVocabularyLookupResponse {
         return lines
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private extension AIQuickWordLookupResponse {
+
+    static func decodeFromAIContent(_ content: String) throws -> AIQuickWordLookupResponse {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let jsonString = AIVocabularyLookupResponse.strippedMarkdownFence(from: trimmedContent)
+
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        return try JSONDecoder()
+            .decode(AIQuickWordLookupResponse.self, from: jsonData)
     }
 }

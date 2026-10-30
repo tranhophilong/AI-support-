@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" fill="none">
+  <!-- Nền thẻ cấu trúc chính -->
+  <rect x="6" y="8" width="36" height="32" rx="6" fill="#4F46E5" />
+  <rect x="9" y="11" width="30" height="26" rx="4" fill="#EEF2FF" />
+
+  <!-- Khối câu gốc ở trên -->
+  <rect x="17" y="14" width="14" height="6" rx="2" fill="#1E40AF" />
+  <text x="20" y="18.8" font-family="system-ui, sans-serif" font-weight="800" font-size="4.8" fill="#FFFFFF">S+V+O</text>
+
+  <!-- Đường nhánh phân tích cây cú pháp -->
+  <path d="M24 20V24M24 24H15V27M24 24V27M24 24H33V27" stroke="#6366F1" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- 3 khối thành phần S - V - O -->
+  <rect x="11.5" y="27" width="7" height="6.5" rx="1.8" fill="#2563EB" />
+  <text x="13.8" y="31.8" font-family="system-ui, sans-serif" font-weight="800" font-size="4.8" fill="#FFFFFF">S</text>
+
+  <rect x="20.5" y="27" width="7" height="6.5" rx="1.8" fill="#16A34A" />
+  <text x="22.7" y="31.8" font-family="system-ui, sans-serif" font-weight="800" font-size="4.8" fill="#FFFFFF">V</text>
+
+  <rect x="29.5" y="27" width="7" height="6.5" rx="1.8" fill="#F59E0B" />
+  <text x="31.6" y="31.8" font-family="system-ui, sans-serif" font-weight="800" font-size="4.8" fill="#FFFFFF">O</text>
+
+  <!-- Ngôi sao AI Sparkle -->
+  <path d="M39 5L40.1 8.4L43.5 9.5L40.1 10.6L39 14L37.9 10.6L34.5 9.5L37.9 8.4L39 5Z" fill="#F59E0B" />
+</svg>

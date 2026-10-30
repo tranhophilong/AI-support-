@@ -14,6 +14,8 @@ struct English_CorrectorApp: App {
     let container: ModelContainer
 
     init() {
+        _ = NotificationManager.shared
+
         do {
             let config = ModelConfiguration(isStoredInMemoryOnly: false)
             container = try ModelContainer(
@@ -21,6 +23,10 @@ struct English_CorrectorApp: App {
                 MessageModel.self,
                 SavedNoteModel.self,
                 VocabularyNoteModel.self,
+                SituationAskSessionModel.self,
+                SituationAskMessageModel.self,
+                SentenceStructureAnalysisModel.self,
+                MistakeSummaryReportModel.self,
                 configurations: config
             )
 
