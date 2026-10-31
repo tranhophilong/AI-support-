@@ -109,12 +109,57 @@ final class SceneVisionAIService {
         )
     }
 
-    /// Identifies a specific object located at (xPercent, yPercent) in the image when user long-presses.
+    /// Identifies a specific object located at (xPercent, yPercent) in the image using iOS on-device Vision detection + multimodal AI.
+    func identifyObjectWithIOSDetection(
+        fullImage: UIImage,
+        xPercent: Double,
+        yPercent: Double
+    ) async throws -> AISceneObjectVocabularyItem {
+        // 1. Detect & Crop with Apple Vision on-device
+        let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
+            from: fullImage,
+            atXPercent: xPercent,
+            yPercent: yPercent
+        )
+
+        // 2. Multimodal AI Analysis with Groq (fallback to Gemini)
+        let groqKey = APIKeyStore.groqAPIKey
+        if !groqKey.isEmpty {
+            do {
+                return try await identifyCroppedObjectWithGroq(
+                    detected: detected,
+                    apiKey: groqKey
+                )
+            } catch {
+                print("DEBUG: Groq cropped object analysis failed: \(error). Falling back to Gemini...")
+            }
+        }
+
+        let geminiKey = APIKeyStore.geminiAPIKey
+        guard !geminiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey(provider: "Groq", keyName: "GROQ_API_KEY")
+        }
+
+        return try await identifyCroppedObjectWithGemini(
+            detected: detected,
+            apiKey: geminiKey
+        )
+    }
+
+    /// Backwards compatible method: delegates to iOS Vision detection if UIImage can be parsed from data.
     func identifyObjectAtPoint(
         imageData: Data,
         xPercent: Double,
         yPercent: Double
     ) async throws -> AISceneObjectVocabularyItem {
+        if let uiImage = UIImage(data: imageData) {
+            return try await identifyObjectWithIOSDetection(
+                fullImage: uiImage,
+                xPercent: xPercent,
+                yPercent: yPercent
+            )
+        }
+
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
             do {
@@ -376,6 +421,113 @@ final class SceneVisionAIService {
         return item
     }
 
+    private func identifyCroppedObjectWithGroq(
+        detected: IOSDetectedObjectResult,
+        apiKey: String
+    ) async throws -> AISceneObjectVocabularyItem {
+        let processedData = optimizeImageForVision(imageData: detected.croppedImageData)
+        let base64String = processedData.base64EncodedString()
+        let dataUri = "data:image/jpeg;base64,\(base64String)"
+
+        let hintsText = detected.onDeviceLabels.isEmpty
+            ? ""
+            : "Apple Vision on-device detection hints: \(detected.onDeviceLabels.joined(separator: ", "))."
+
+        let systemInstruction = """
+        You are an expert English vocabulary tutor and image analyst.
+        The user isolated a specific physical object from their photo (shown in this cropped image).
+        \(hintsText)
+
+        Identify the specific physical object prominently displayed in this cropped image.
+        Respond ONLY with a valid JSON object strictly matching this schema:
+        {
+          "word": "Specific English name of this object (e.g., 'ceramic mug', 'laptop keyboard', 'monstera plant', 'wrist watch')",
+          "phonetic": "/IPA pronunciation/",
+          "partOfSpeech": "Noun",
+          "vietnameseMeaning": "Clear, natural Vietnamese translation of this object",
+          "exampleInContext": "A natural, helpful English sentence describing this object in everyday context."
+        }
+        """
+
+        let promptText = "Identify the main object in this cropped photo. Provide its English vocabulary, IPA pronunciation, Vietnamese meaning, and an example sentence."
+
+        let requestPayload: [String: Any] = [
+            "model": groqVisionModel,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemInstruction
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": promptText
+                        ],
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": dataUri
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            "response_format": [
+                "type": "json_object"
+            ],
+            "temperature": 0.1
+        ]
+
+        guard let endpoint = URL(string: "https://api.groq.com/openai/v1/chat/completions") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown Groq error"
+            throw AIServiceError.requestFailed(
+                provider: "Groq",
+                statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500,
+                message: errorMsg
+            )
+        }
+
+        let responseBody = try JSONDecoder().decode(GroqChatCompletionResponse.self, from: data)
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(provider: "Groq", message: error.message)
+        }
+
+        guard let rawText = responseBody.choices?.first?.message.content else {
+            throw AIServiceError.emptyResponse(provider: "Groq")
+        }
+
+        let cleaned = Self.strippedMarkdownFence(from: rawText)
+        guard let jsonData = cleaned.data(using: .utf8) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        let parsed = try JSONDecoder().decode(AISceneObjectVocabularyItem.self, from: jsonData)
+
+        return AISceneObjectVocabularyItem(
+            word: parsed.word,
+            phonetic: parsed.phonetic,
+            partOfSpeech: parsed.partOfSpeech.isEmpty ? "Noun" : parsed.partOfSpeech,
+            vietnameseMeaning: parsed.vietnameseMeaning,
+            exampleInContext: parsed.exampleInContext,
+            xPercent: Double(detected.refinedCenterPercent.x),
+            yPercent: Double(detected.refinedCenterPercent.y),
+            box2d: detected.box2dGrounding
+        )
+    }
+
     // MARK: - Gemini Vision Fallback (gemini-2.5-flash)
 
     private func describeSceneWithGemini(
@@ -584,6 +736,108 @@ final class SceneVisionAIService {
             )
         }
         return item
+    }
+
+    private func identifyCroppedObjectWithGemini(
+        detected: IOSDetectedObjectResult,
+        apiKey: String
+    ) async throws -> AISceneObjectVocabularyItem {
+        let processedData = optimizeImageForVision(imageData: detected.croppedImageData)
+        let base64String = processedData.base64EncodedString()
+
+        let hintsText = detected.onDeviceLabels.isEmpty
+            ? ""
+            : "Apple Vision on-device detection hints: \(detected.onDeviceLabels.joined(separator: ", "))."
+
+        let systemInstruction = """
+        You are an expert English vocabulary tutor.
+        The user isolated a specific physical object from their photo (shown in this cropped image).
+        \(hintsText)
+
+        Identify the specific physical object prominently displayed in this cropped image.
+        Respond ONLY with valid JSON strictly matching this schema:
+        {
+          "word": "Specific English noun or noun phrase",
+          "phonetic": "/IPA pronunciation/",
+          "partOfSpeech": "Noun",
+          "vietnameseMeaning": "Clear, natural Vietnamese meaning",
+          "exampleInContext": "Helpful English sentence using this word in everyday context."
+        }
+        """
+
+        let promptText = "Identify the main object in this cropped photo. Provide its English vocabulary, IPA, Vietnamese meaning, and context sentence."
+
+        let body = GeminiVisionContentRequest(
+            systemInstruction: GeminiVisionContent(
+                parts: [GeminiVisionPart(text: systemInstruction)]
+            ),
+            contents: [
+                GeminiVisionContent(
+                    parts: [
+                        GeminiVisionPart(text: promptText),
+                        GeminiVisionPart(
+                            inlineData: GeminiVisionInlineData(
+                                mimeType: "image/jpeg",
+                                data: base64String
+                            )
+                        )
+                    ]
+                )
+            ],
+            generationConfig: GeminiVisionGenerationConfig(
+                responseMimeType: "application/json",
+                responseSchema: nil
+            )
+        )
+
+        guard let endpoint = URL(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        ) else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw AIServiceError.requestFailed(
+                provider: "Gemini",
+                statusCode: httpResponse.statusCode,
+                message: String(data: data, encoding: .utf8)
+            )
+        }
+
+        let responseBody = try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(provider: "Gemini", message: error.message)
+        }
+
+        guard let rawText = responseBody.candidates?.first?.content?.parts.first?.text else {
+            throw AIServiceError.emptyResponse(provider: "Gemini")
+        }
+
+        let cleaned = Self.strippedMarkdownFence(from: rawText)
+        guard let jsonData = cleaned.data(using: .utf8) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        let parsed = try JSONDecoder().decode(AISceneObjectVocabularyItem.self, from: jsonData)
+
+        return AISceneObjectVocabularyItem(
+            word: parsed.word,
+            phonetic: parsed.phonetic,
+            partOfSpeech: parsed.partOfSpeech.isEmpty ? "Noun" : parsed.partOfSpeech,
+            vietnameseMeaning: parsed.vietnameseMeaning,
+            exampleInContext: parsed.exampleInContext,
+            xPercent: Double(detected.refinedCenterPercent.x),
+            yPercent: Double(detected.refinedCenterPercent.y),
+            box2d: detected.box2dGrounding
+        )
     }
 
     private static func strippedMarkdownFence(from content: String) -> String {

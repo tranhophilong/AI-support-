@@ -855,10 +855,10 @@ struct InteractiveSceneImageViewerSheet: View {
                 .scaleEffect(0.65)
                 .tint(.white)
 
-            HStack(spacing: 4) {
-                Image(systemName: "sparkles")
+            HStack(spacing: 5) {
+                Image(systemName: "camera.viewfinder")
                     .font(.system(size: 8, weight: .bold))
-                Text("AI đang nhận diện...")
+                Text("Apple Vision & AI...")
                     .font(.system(size: 9, weight: .bold))
             }
             .foregroundStyle(.white)
@@ -891,12 +891,8 @@ struct InteractiveSceneImageViewerSheet: View {
 
         Task {
             do {
-                guard let jpeg = image.jpegData(compressionQuality: 0.8) else {
-                    throw AIServiceError.apiError(provider: "Vision", message: "Không thể mã hoá ảnh")
-                }
-
-                let newItem = try await SceneVisionAIService.shared.identifyObjectAtPoint(
-                    imageData: jpeg,
+                let newItem = try await SceneVisionAIService.shared.identifyObjectWithIOSDetection(
+                    fullImage: image,
                     xPercent: clampedX,
                     yPercent: clampedY
                 )
