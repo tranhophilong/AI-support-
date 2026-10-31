@@ -474,6 +474,8 @@ struct InteractiveSceneImageViewerSheet: View {
     @State private var detectingPoint: CGPoint? = nil
     @State private var detectionErrorMessage: String? = nil
     @State private var hasTriggeredLongPress: Bool = false
+    @State private var activeLiftedCrop: LiftedCropState? = nil
+    @State private var objectThumbnails: [String: UIImage] = [:]
 
     // Zoom, Pan & Interactive Dismiss States
     @State private var scale: CGFloat = 1.0
@@ -653,8 +655,16 @@ struct InteractiveSceneImageViewerSheet: View {
                         }
                     }
 
+                    // 3.5. Animated Crop-Out / Lifted Object Cutout
+                    if let lifted = activeLiftedCrop {
+                        LiftedCropObjectOverlayView(
+                            cropState: lifted,
+                            accentColor: AppTheme.Semantic.warning
+                        )
+                    }
+
                     // 4. Interactive Long-Press Detection Radar Ring
-                    if let point = detectingPoint, isDetectingObject {
+                    if let point = detectingPoint, isDetectingObject, activeLiftedCrop == nil {
                         detectingRadarView
                             .position(point)
                     }
@@ -891,20 +901,70 @@ struct InteractiveSceneImageViewerSheet: View {
 
         Task {
             do {
-                let newItem = try await SceneVisionAIService.shared.identifyObjectWithIOSDetection(
-                    fullImage: image,
-                    xPercent: clampedX,
+                // 1. Instant on-device Apple Vision detection (~15ms)
+                let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
+                    from: image,
+                    atXPercent: clampedX,
                     yPercent: clampedY
                 )
 
+                // 2. Animate the Crop / Lift effect immediately on screen
+                await MainActor.run {
+                    let box = detected.boundingBoxPercent
+                    let rect = CGRect(
+                        x: (box.origin.x / 100.0) * imageSize.width,
+                        y: (box.origin.y / 100.0) * imageSize.height,
+                        width: (box.size.width / 100.0) * imageSize.width,
+                        height: (box.size.height / 100.0) * imageSize.height
+                    )
+                    let refined = CGPoint(
+                        x: (detected.refinedCenterPercent.x / 100.0) * imageSize.width,
+                        y: (detected.refinedCenterPercent.y / 100.0) * imageSize.height
+                    )
+
+                    detectingPoint = refined
+
+                    activeLiftedCrop = LiftedCropState(
+                        image: detected.croppedImage,
+                        rect: rect,
+                        refinedCenter: refined,
+                        isLifted: false,
+                        isAICompleted: false,
+                        detectedLabels: detected.onDeviceLabels
+                    )
+
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+
+                    withAnimation(.spring(response: 0.38, dampingFraction: 0.65)) {
+                        activeLiftedCrop?.isLifted = true
+                    }
+                }
+
+                // 3. Multimodal AI Analysis with Groq / Gemini in parallel
+                let newItem = try await SceneVisionAIService.shared.identifyObject(from: detected)
+
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+                    // Save cropped thumbnail for persistent display in vocabulary card
+                    objectThumbnails[newItem.id] = detected.croppedImage
+
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        activeLiftedCrop?.isLifted = false
+                        activeLiftedCrop?.isAICompleted = true
                         isDetectingObject = false
                         detectingPoint = nil
                         currentScene.objectsDetected.append(newItem)
                         selectedObject = newItem
                     }
+
+                    // Keep cropped overlay briefly for settling before removing
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            activeLiftedCrop = nil
+                        }
+                    }
+
                     onUpdateScene?(currentScene)
                 }
             } catch {
@@ -913,6 +973,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     withAnimation {
                         isDetectingObject = false
                         detectingPoint = nil
+                        activeLiftedCrop = nil
                         detectionErrorMessage = "Không thể nhận diện vật thể tại điểm này. Vui lòng thử lại."
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -1047,7 +1108,19 @@ struct InteractiveSceneImageViewerSheet: View {
         let isSaved = isWordSaved?(item.word) ?? false
 
         return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                if let thumb = objectThumbnails[item.id] {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(AppTheme.Semantic.warning.opacity(0.8), lineWidth: 1)
+                        }
+                }
+
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(item.word)
@@ -1263,5 +1336,164 @@ struct CurvedLeaderArrowView: View {
         }
         .allowsHitTesting(false)
         .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Lifted Crop Cutout & Viewfinder Views
+
+struct LiftedCropState: Equatable, Identifiable {
+    var id: String { "\(rect.origin.x)-\(rect.origin.y)" }
+    let image: UIImage
+    let rect: CGRect
+    let refinedCenter: CGPoint
+    var isLifted: Bool = false
+    var isAICompleted: Bool = false
+    var detectedLabels: [String] = []
+}
+
+struct LiftedCropObjectOverlayView: View {
+    let cropState: LiftedCropState
+    let accentColor: Color
+
+    @State private var shimmerPhase: CGFloat = -1.2
+    @State private var pulseGlow: Bool = false
+
+    var body: some View {
+        ZStack {
+            // Cutout Image with glowing border and elevation
+            Image(uiImage: cropState.image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: max(20, cropState.rect.width), height: max(20, cropState.rect.height))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    accentColor,
+                                    .white,
+                                    AppTheme.Primary.p300,
+                                    accentColor
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: cropState.isLifted ? 2.5 : 1.5
+                        )
+                }
+                .overlay {
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        .clear,
+                                        Color.white.opacity(0.45),
+                                        .clear
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .rotationEffect(.degrees(25))
+                            .offset(x: shimmerPhase * geo.size.width)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                .overlay {
+                    ViewfinderCornerBracketsView(color: accentColor)
+                        .padding(-3)
+                }
+                .shadow(
+                    color: Color.black.opacity(cropState.isLifted ? 0.7 : 0.2),
+                    radius: cropState.isLifted ? 16 : 4,
+                    x: 0,
+                    y: cropState.isLifted ? 10 : 2
+                )
+                .shadow(
+                    color: accentColor.opacity(pulseGlow ? 0.6 : 0.2),
+                    radius: cropState.isLifted ? 10 : 3,
+                    x: 0,
+                    y: 0
+                )
+                .scaleEffect(cropState.isLifted ? 1.08 : 0.95)
+
+            // Floating status badge above the lifted object
+            if !cropState.isAICompleted {
+                HStack(spacing: 5) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(accentColor)
+
+                    Text(cropState.detectedLabels.first != nil
+                         ? "Đã bóc tách: \(cropState.detectedLabels.first!.capitalized)"
+                         : "Đã bóc tách vật thể...")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    ProgressView()
+                        .scaleEffect(0.55)
+                        .tint(.white)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.88))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(accentColor.opacity(0.8), lineWidth: 0.8)
+                }
+                .shadow(radius: 6)
+                .offset(y: -(cropState.rect.height / 2.0) - 26)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .position(x: cropState.rect.midX, y: cropState.rect.midY)
+        .onAppear {
+            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                shimmerPhase = 1.2
+            }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulseGlow = true
+            }
+        }
+    }
+}
+
+struct ViewfinderCornerBracketsView: View {
+    let color: Color
+    let length: CGFloat = 10
+    let thickness: CGFloat = 2.5
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+
+            Path { path in
+                // Top-Left
+                path.move(to: CGPoint(x: 0, y: length))
+                path.addLine(to: CGPoint(x: 0, y: 0))
+                path.addLine(to: CGPoint(x: length, y: 0))
+
+                // Top-Right
+                path.move(to: CGPoint(x: w - length, y: 0))
+                path.addLine(to: CGPoint(x: w, y: 0))
+                path.addLine(to: CGPoint(x: w, y: length))
+
+                // Bottom-Left
+                path.move(to: CGPoint(x: 0, y: h - length))
+                path.addLine(to: CGPoint(x: 0, y: h))
+                path.addLine(to: CGPoint(x: length, y: h))
+
+                // Bottom-Right
+                path.move(to: CGPoint(x: w - length, y: h))
+                path.addLine(to: CGPoint(x: w, y: h))
+                path.addLine(to: CGPoint(x: w, y: h - length))
+            }
+            .stroke(color, style: StrokeStyle(lineWidth: thickness, lineCap: .round, lineJoin: .round))
+        }
+        .allowsHitTesting(false)
     }
 }

@@ -109,20 +109,8 @@ final class SceneVisionAIService {
         )
     }
 
-    /// Identifies a specific object located at (xPercent, yPercent) in the image using iOS on-device Vision detection + multimodal AI.
-    func identifyObjectWithIOSDetection(
-        fullImage: UIImage,
-        xPercent: Double,
-        yPercent: Double
-    ) async throws -> AISceneObjectVocabularyItem {
-        // 1. Detect & Crop with Apple Vision on-device
-        let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
-            from: fullImage,
-            atXPercent: xPercent,
-            yPercent: yPercent
-        )
-
-        // 2. Multimodal AI Analysis with Groq (fallback to Gemini)
+    /// Analyzes an already detected and cropped object with multimodal AI.
+    func identifyObject(from detected: IOSDetectedObjectResult) async throws -> AISceneObjectVocabularyItem {
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
             do {
@@ -144,6 +132,23 @@ final class SceneVisionAIService {
             detected: detected,
             apiKey: geminiKey
         )
+    }
+
+    /// Identifies a specific object located at (xPercent, yPercent) in the image using iOS on-device Vision detection + multimodal AI.
+    func identifyObjectWithIOSDetection(
+        fullImage: UIImage,
+        xPercent: Double,
+        yPercent: Double
+    ) async throws -> AISceneObjectVocabularyItem {
+        // 1. Detect & Crop with Apple Vision on-device
+        let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
+            from: fullImage,
+            atXPercent: xPercent,
+            yPercent: yPercent
+        )
+
+        // 2. Multimodal AI Analysis with Groq (fallback to Gemini)
+        return try await identifyObject(from: detected)
     }
 
     /// Backwards compatible method: delegates to iOS Vision detection if UIImage can be parsed from data.
