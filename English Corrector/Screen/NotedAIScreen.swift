@@ -524,9 +524,7 @@ struct NotedAIScreen: View {
 
                     if isAnalyzingMistakes {
                         VStack(spacing: 14) {
-                            ProgressView()
-                                .tint(AppTheme.Primary.p500)
-                                .scaleEffect(1.2)
+                            AppThemeLoadingView(customSize: 34)
                             Text("AI đang phân tích lịch sử lỗi sai và tổng hợp điểm cần cải thiện...")
                                 .font(.subheadline)
                                 .foregroundStyle(AppTheme.Neutral.n500)

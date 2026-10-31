@@ -181,6 +181,8 @@ struct ListConversationScreen: View {
     @State private var path = NavigationPath()
     @State private var showWidgetOnboarding = false
     @State private var showNotedAIScreen = false
+    @State private var showVoiceRoleplaySheet = false
+    @State private var activeVoiceConversation: ConversationModel?
 
     private var appThemeMode: AppThemeMode {
         AppThemeMode(rawValue: appThemeModeRawValue) ?? .light
@@ -239,6 +241,25 @@ struct ListConversationScreen: View {
                                 y: 8
                             )
                         }
+
+                        Button {
+                            showVoiceRoleplaySheet = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "waveform.and.mic")
+                                Text("Giao tiếp Voice AI & Roleplay")
+                                    .fontWeight(.semibold)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 13)
+                            .background(AppTheme.Accent.a50)
+                            .foregroundStyle(AppTheme.Accent.a600)
+                            .clipShape(Capsule())
+                            .overlay {
+                                Capsule()
+                                    .strokeBorder(AppTheme.Accent.a500.opacity(0.5), lineWidth: 1.2)
+                            }
+                        }
                     }
                     .frame(
                         maxWidth: .infinity,
@@ -254,6 +275,8 @@ struct ListConversationScreen: View {
                     ScrollView {
 
                         LazyVStack(spacing: 14) {
+
+                            liveVoiceQuickStartBanner
 
                             ForEach(conversations) { conversation in
 
@@ -272,6 +295,12 @@ struct ListConversationScreen: View {
                                     }
                                 }
                                 .contextMenu {
+                                    Button {
+                                        activeVoiceConversation = conversation
+                                    } label: {
+                                        Label("Mở Giao tiếp Voice AI", systemImage: "waveform.and.mic")
+                                    }
+
                                     Button(role: .destructive) {
                                         deleteConversation(conversation)
                                     } label: {
@@ -311,15 +340,22 @@ struct ListConversationScreen: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        Button {
+                            showVoiceRoleplaySheet = true
+                        } label: {
+                            Image(systemName: "waveform.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(AppTheme.Accent.a600)
+                        }
+                        .accessibilityLabel("Giao tiếp Voice AI")
 
-                    Button {
-
-                        createConversation()
-
-                    } label: {
-
-                        Image(systemName: "square.and.pencil")
-                            .foregroundStyle(AppTheme.Primary.p700)
+                        Button {
+                            createConversation()
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                                .foregroundStyle(AppTheme.Primary.p700)
+                        }
                     }
                 }
             }
@@ -337,6 +373,17 @@ struct ListConversationScreen: View {
             }
             .navigationDestination(isPresented: $showNotedAIScreen) {
                 NotedAIScreen()
+            }
+            .sheet(isPresented: $showVoiceRoleplaySheet) {
+                VoiceRoleplayPickerSheet { scenario in
+                    showVoiceRoleplaySheet = false
+                    startRoleplayVoiceConversation(scenario)
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(item: $activeVoiceConversation) { voiceConv in
+                LiveVoiceConversationScreen(conversation: voiceConv)
             }
             .sheet(isPresented: $showWidgetOnboarding) {
                 WidgetOnboardingSheet(
@@ -414,6 +461,88 @@ struct ListConversationScreen: View {
         } else {
             // Fallback to Notes tab if the source conversation was deleted
             coordinator.selectedTab = .notes
+        }
+    }
+
+    private var liveVoiceQuickStartBanner: some View {
+        Button {
+            showVoiceRoleplaySheet = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.Primary.p500)
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "waveform.and.mic")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("Giao tiếp Voice AI 2 chiều")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(AppTheme.Neutral.n900)
+
+                        Text("LIVE")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.Accent.a600)
+                            .clipShape(Capsule())
+                    }
+
+                    Text("Đóng vai tình huống thực tế & luyện phản xạ nghe nói trực tiếp")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
+            }
+            .padding(14)
+            .background(
+                LinearGradient(
+                    colors: [AppTheme.Primary.p50, AppTheme.Accent.a50],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(AppTheme.Primary.p300, lineWidth: 1.3)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @MainActor
+    private func startRoleplayVoiceConversation(_ scenario: VoiceRoleplayScenario) {
+        let conversation = ConversationModel(
+            title: scenario.title,
+            conversationDescription: scenario.contextDescription
+        )
+        context.insert(conversation)
+
+        let starterMessage = MessageModel(
+            text: scenario.starterQuestion,
+            isUser: false,
+            followUpQuestion: scenario.starterQuestion,
+            suggestedReplies: scenario.starterReplies
+        )
+        starterMessage.conversation = conversation
+        context.insert(starterMessage)
+
+        try? context.save()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            activeVoiceConversation = conversation
         }
     }
 

@@ -168,29 +168,55 @@ struct SituationAskScreen: View {
                                             }
                                             .id(item.id)
                                         }
-
-                                        if isLoading {
-                                            HStack(spacing: 10) {
-                                                ProgressView()
-                                                    .tint(AppTheme.Primary.p500)
-                                                Text("AI đang phân tích tình huống & tìm cách nói tự nhiên nhất...")
-                                                    .font(.subheadline)
-                                                    .foregroundStyle(AppTheme.Neutral.n500)
-                                            }
-                                            .padding(.vertical, 16)
-                                            .frame(maxWidth: .infinity)
-                                        }
-
-                                        if let errorMessage {
-                                            errorBanner(errorMessage)
-                                        }
-
-                                        Color.clear
-                                            .frame(height: 1)
-                                            .id("situation-bottom")
                                     }
                                     .padding(.horizontal, 16)
                                     .padding(.top, 14)
+
+                                    if isLoading {
+                                        HStack(spacing: 10) {
+                                            AppThemeLoadingView(customSize: 26)
+                                            HStack(spacing: 5) {
+                                                Text("AI đang phân tích tình huống & tìm cách nói tự nhiên nhất")
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(AppTheme.Neutral.n500)
+                                                AppThemeWaveDotsView(dotSize: 5, spacing: 3, bounceHeight: 3.8)
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 12)
+                                        .background(AppTheme.Surface.card)
+                                        .clipShape(Capsule())
+                                        .overlay {
+                                            Capsule()
+                                                .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.horizontal, 16)
+                                        .id("situation-loading")
+                                    }
+
+                                    if let errorMessage {
+                                        errorBanner(errorMessage)
+                                            .padding(.horizontal, 16)
+                                    }
+
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("situation-bottom")
+                                }
+                            }
+                            .onChange(of: isLoading) { _, newValue in
+                                guard newValue else { return }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        proxy.scrollTo("situation-loading", anchor: .bottom)
+                                    }
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                                    guard isLoading else { return }
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        proxy.scrollTo("situation-loading", anchor: .bottom)
+                                    }
                                 }
                             }
                             .onChange(of: sortedMessages.count) { _, _ in
@@ -198,7 +224,11 @@ struct SituationAskScreen: View {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                                     withAnimation(.easeInOut(duration: 0.25)) {
                                         if lastMsg.isUser {
-                                            proxy.scrollTo("situation-bottom", anchor: .bottom)
+                                            if isLoading {
+                                                proxy.scrollTo("situation-loading", anchor: .bottom)
+                                            } else {
+                                                proxy.scrollTo(lastMsg.id, anchor: .bottom)
+                                            }
                                         } else {
                                             proxy.scrollTo(lastMsg.id, anchor: .top)
                                         }

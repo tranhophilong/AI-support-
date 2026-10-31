@@ -112,6 +112,197 @@ enum AppTheme {
             darkOpacity: 0.35
         )
     }
+
+    /// Bảng màu chuẩn dùng cho hiệu ứng Loading đa sắc của ứng dụng
+    static let loadingPalette: [Color] = [
+        Primary.p500,
+        Primary.p300,
+        Accent.a500,
+        Semantic.success,
+        Primary.p500
+    ]
+}
+
+// MARK: - Custom Multi-Color AppTheme Loading Indicator & Bouncing Wave Dots
+
+/// Hiệu ứng 3 dấu chấm nhảy lên xuống lệch pha như gợn sóng với bộ màu của AppTheme
+struct AppThemeWaveDotsView: View {
+    var dotSize: CGFloat = 5.5
+    var spacing: CGFloat = 3.5
+    var bounceHeight: CGFloat = 4.0
+
+    @State private var bounceStates: [Bool] = [false, false, false]
+
+    private let dotColors: [Color] = [
+        AppTheme.Primary.p500,
+        AppTheme.Accent.a500,
+        AppTheme.Semantic.success
+    ]
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(dotColors[index])
+                    .frame(width: dotSize, height: dotSize)
+                    .scaleEffect(bounceStates[index] ? 1.15 : 0.82)
+                    .offset(y: bounceStates[index] ? -bounceHeight : bounceHeight * 0.55)
+            }
+        }
+        .frame(
+            width: dotSize * 3 + spacing * 2,
+            height: dotSize + bounceHeight * 2.2
+        )
+        .fixedSize()
+        .onAppear {
+            bounceStates = [false, false, false]
+            for index in 0..<3 {
+                let delay = Double(index) * 0.14
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    withAnimation(
+                        .easeInOut(duration: 0.42)
+                        .repeatForever(autoreverses: true)
+                    ) {
+                        bounceStates[index] = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct AppThemeLoadingView: View {
+    @Environment(\.controlSize) private var controlSize
+
+    var customSize: CGFloat? = nil
+    var lineWidth: CGFloat? = nil
+
+    @State private var isSpinning = false
+    @State private var isPulsing = false
+
+    private var resolvedSize: CGFloat {
+        if let customSize {
+            return customSize
+        }
+        switch controlSize {
+        case .mini:
+            return 16
+        case .small:
+            return 20
+        case .regular:
+            return 28
+        case .large, .extraLarge:
+            return 36
+        @unknown default:
+            return 28
+        }
+    }
+
+    private var resolvedLineWidth: CGFloat {
+        if let lineWidth {
+            return lineWidth
+        }
+        if resolvedSize <= 20 {
+            return 2.2
+        } else if resolvedSize <= 28 {
+            return 3.0
+        } else {
+            return 3.6
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            // 1. Vòng nền mờ kết hợp màu Primary & Accent
+            Circle()
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            AppTheme.Primary.p100.opacity(0.75),
+                            AppTheme.Accent.a100.opacity(0.75),
+                            AppTheme.Primary.p100.opacity(0.75)
+                        ],
+                        center: .center
+                    ),
+                    lineWidth: resolvedLineWidth
+                )
+
+            // 2. Vòng cung xoay chuyển sắc với các màu hiện có trong AppTheme
+            Circle()
+                .trim(from: 0.08, to: isPulsing ? 0.78 : 0.36)
+                .stroke(
+                    AngularGradient(
+                        colors: AppTheme.loadingPalette,
+                        center: .center,
+                        startAngle: .degrees(0),
+                        endAngle: .degrees(360)
+                    ),
+                    style: StrokeStyle(
+                        lineWidth: resolvedLineWidth,
+                        lineCap: .round
+                    )
+                )
+                .rotationEffect(.degrees(isSpinning ? 360 : 0))
+
+            // 3. Dấu 3 chấm nhảy lên xuống như gợn sóng ở tâm vòng tròn
+            AppThemeWaveDotsView(
+                dotSize: max(2.8, resolvedSize * 0.145),
+                spacing: max(1.6, resolvedSize * 0.065),
+                bounceHeight: max(2.0, resolvedSize * 0.12)
+            )
+        }
+        .frame(width: resolvedSize, height: resolvedSize)
+        .fixedSize()
+        .onAppear {
+            isSpinning = false
+            isPulsing = false
+            DispatchQueue.main.async {
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                    isSpinning = true
+                }
+                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                    isPulsing = true
+                }
+            }
+        }
+        .accessibilityLabel("Đang tải")
+    }
+}
+
+struct AppThemeProgressViewStyle: ProgressViewStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        if let fraction = configuration.fractionCompleted {
+            VStack(alignment: .leading, spacing: 6) {
+                configuration.label
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(AppTheme.Surface.cardMuted)
+
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        AppTheme.Primary.p500,
+                                        AppTheme.Accent.a500,
+                                        AppTheme.Semantic.success
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: max(0, min(geo.size.width, geo.size.width * fraction)))
+                    }
+                }
+                .frame(height: 6)
+            }
+        } else {
+            VStack(spacing: 6) {
+                AppThemeLoadingView()
+                configuration.label
+            }
+        }
+    }
 }
 
 extension Color {

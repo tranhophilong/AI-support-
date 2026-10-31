@@ -47,6 +47,7 @@ struct RootTabView: View {
                 .tag(AppTab.vocabulary)
         }
         .tint(AppTheme.Primary.p500)
+        .progressViewStyle(AppThemeProgressViewStyle())
         .preferredColorScheme(appThemeMode.colorScheme)
         .scrollDismissesKeyboard(.immediately)
         .background(GlobalKeyboardDismissInstaller())

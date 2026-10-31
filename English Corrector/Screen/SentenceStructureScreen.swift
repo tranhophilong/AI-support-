@@ -404,8 +404,7 @@ struct SentenceStructureScreen: View {
 
     private var loadingCard: some View {
         VStack(spacing: 12) {
-            ProgressView()
-                .tint(AppTheme.Primary.p500)
+            AppThemeLoadingView(customSize: 32)
             Text("Đang bóc tách từng thành phần S - V - O, mệnh đề và cấu trúc ngữ pháp...")
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.Neutral.n500)
@@ -1176,9 +1175,7 @@ struct SentenceStructureScreen: View {
 
             if isAskingFollowUp {
                 HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AppTheme.Primary.p500)
+                    AppThemeLoadingView(customSize: 18)
                     Text("Đang giải đáp thắc mắc ngữ pháp...")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)

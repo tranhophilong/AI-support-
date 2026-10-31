@@ -15,6 +15,7 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
     @Published private(set) var isSpeakingSlow: Bool = false
 
     private let synthesizer = AVSpeechSynthesizer()
+    private var onFinishCallback: (@MainActor () -> Void)?
 
     override init() {
         super.init()
@@ -58,10 +59,49 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
 
         speakingText = cleaned
         isSpeakingSlow = slow
+        onFinishCallback = nil
+        synthesizer.speak(utterance)
+    }
+
+    func speakWithCallback(
+        _ text: String,
+        rateMultiplier: Float = 1.0,
+        onFinish: (@MainActor () -> Void)? = nil
+    ) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            onFinish?()
+            return
+        }
+
+        if synthesizer.isSpeaking {
+            onFinishCallback = nil
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("DEBUG: Failed to configure AVAudioSession for TTS: \(error)")
+        }
+
+        let utterance = AVSpeechUtterance(string: cleaned)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        let baseRate = AVSpeechUtteranceDefaultSpeechRate
+        let clampedRate = min(max(baseRate * rateMultiplier, 0.32), 0.62)
+        utterance.rate = clampedRate
+        utterance.pitchMultiplier = 1.0
+
+        speakingText = cleaned
+        isSpeakingSlow = rateMultiplier < 0.9
+        onFinishCallback = onFinish
         synthesizer.speak(utterance)
     }
 
     func stop() {
+        onFinishCallback = nil
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -74,6 +114,9 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
             if self.speakingText == utterance.speechString {
                 self.speakingText = nil
                 self.isSpeakingSlow = false
+                let callback = self.onFinishCallback
+                self.onFinishCallback = nil
+                callback?()
             }
         }
     }
@@ -83,6 +126,7 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
             if self.speakingText == utterance.speechString {
                 self.speakingText = nil
                 self.isSpeakingSlow = false
+                self.onFinishCallback = nil
             }
         }
     }

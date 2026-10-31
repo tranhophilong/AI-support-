@@ -32,6 +32,7 @@ struct ChatScreen: View {
     @State private var snackbarMessage = ""
     @State private var pickingTarget: WordPickTarget?
     @State private var isTabBarVisible = false
+    @State private var showLiveVoiceMode = false
 
     @State private var typingSuggestions: [TypingSuggestionItem] = []
     @State private var isFetchingTypingSuggestions = false
@@ -259,30 +260,64 @@ struct ChatScreen: View {
                                     }
                                     .id(item.id)
                                 }
-
-                                if isLoading {
-
-                                    ProgressView()
-                                        .tint(AppTheme.Primary.p500)
-                                        .padding(.top, 20)
-                                }
-
-                                // Bottom anchor for auto-scroll
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("bottom")
                             }
                             .padding(.horizontal)
+
+                            if isLoading {
+                                HStack(spacing: 10) {
+                                    AppThemeLoadingView(customSize: 28)
+                                    HStack(spacing: 5) {
+                                        Text("AI đang phân tích & phản hồi")
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(AppTheme.Neutral.n500)
+                                        AppThemeWaveDotsView(dotSize: 5, spacing: 3, bounceHeight: 3.8)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(AppTheme.Surface.card)
+                                .clipShape(Capsule())
+                                .overlay {
+                                    Capsule()
+                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 4)
+                                .id("loading-indicator")
+                            }
+
+                            // Bottom anchor for auto-scroll
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
                         }
                         .padding(.top)
+                        .onChange(of: isLoading) { _, newValue in
+                            guard newValue else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    proxy.scrollTo("loading-indicator", anchor: .bottom)
+                                }
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                                guard isLoading else { return }
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    proxy.scrollTo("loading-indicator", anchor: .bottom)
+                                }
+                            }
+                        }
                         .onChange(of: conversation.messages.count) { _, _ in
                             let sortedMessages = conversation.messages.sorted(by: { $0.createdAt < $1.createdAt })
                             guard let lastMessage = sortedMessages.last else { return }
 
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     if lastMessage.isUser {
-                                        proxy.scrollTo("bottom", anchor: .bottom)
+                                        if isLoading {
+                                            proxy.scrollTo("loading-indicator", anchor: .bottom)
+                                        } else {
+                                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                        }
                                     } else {
                                         proxy.scrollTo(lastMessage.id, anchor: .top)
                                     }
@@ -347,29 +382,51 @@ struct ChatScreen: View {
             .toolbarBackground(AppTheme.Surface.appBackground, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        ForEach(AIModelOption.allCases) { option in
-                            Button {
-                                selectedAIModelRawValue = option.rawValue
-                            } label: {
-                                Label(
-                                    option.title,
-                                    systemImage: selectedAIModel == option
-                                    ? "checkmark.circle.fill"
-                                    : "circle"
-                                )
+                    HStack(spacing: 12) {
+                        Button {
+                            showLiveVoiceMode = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "waveform.and.mic")
+                                    .font(.caption.bold())
+                                Text("Voice AI")
+                                    .font(.caption.bold())
                             }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.Primary.p500)
+                            .clipShape(Capsule())
                         }
-                    } label: {
-                        Image("swap_icon")
-                            .renderingMode(.original)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 24, height: 24)
-                            .accessibilityLabel("AI Model: \(selectedAIModel.providerName)")
+                        .buttonStyle(.plain)
+
+                        Menu {
+                            ForEach(AIModelOption.allCases) { option in
+                                Button {
+                                    selectedAIModelRawValue = option.rawValue
+                                } label: {
+                                    Label(
+                                        option.title,
+                                        systemImage: selectedAIModel == option
+                                        ? "checkmark.circle.fill"
+                                        : "circle"
+                                    )
+                                }
+                            }
+                        } label: {
+                            Image("swap_icon")
+                                .renderingMode(.original)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 24, height: 24)
+                                .accessibilityLabel("AI Model: \(selectedAIModel.providerName)")
+                        }
+                        .disabled(isLoading)
                     }
-                    .disabled(isLoading)
                 }
+            }
+            .fullScreenCover(isPresented: $showLiveVoiceMode) {
+                LiveVoiceConversationScreen(conversation: conversation)
             }
 
             if showSnackbar {
@@ -491,9 +548,7 @@ struct ChatScreen: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     if isFetchingTypingSuggestions {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(AppTheme.Primary.p500)
+                        AppThemeLoadingView(customSize: 16)
                             .padding(.trailing, 2)
                     }
 
@@ -2188,9 +2243,7 @@ struct QuickWordLookupPopoverView: View {
             // 2. BODY: MEANING & GRAMMAR ROLE IN SENTENCE
             if isLoading {
                 HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AppTheme.Primary.p500)
+                    AppThemeLoadingView(customSize: 18)
                     Text("Đang tra nghĩa & vai trò trong câu...")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)
@@ -2688,9 +2741,7 @@ struct QuickSentenceAnalysisPopoverView: View {
 
             if isLoading {
                 HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AppTheme.Primary.p500)
+                    AppThemeLoadingView(customSize: 18)
                     Text("Đang phân tích nhanh cấu trúc câu...")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)

@@ -395,8 +395,7 @@ struct VocabularyRemoteImageView: View {
                 case .empty:
                     ZStack {
                         AppTheme.Surface.cardMuted
-                        ProgressView()
-                            .controlSize(.small)
+                        AppThemeLoadingView(customSize: 18)
                     }
                 @unknown default:
                     EmptyView()

@@ -628,8 +628,7 @@ private struct VocabularyDetailSheet: View {
 
                         if isLoading {
                             VStack(spacing: 12) {
-                                ProgressView()
-                                    .tint(AppTheme.Primary.p500)
+                                AppThemeLoadingView(customSize: 32)
                                 Text("Đang tra cứu nghĩa & từ đồng nghĩa bằng AI...")
                                     .font(.subheadline)
                                     .foregroundStyle(AppTheme.Neutral.n500)
@@ -994,9 +993,7 @@ private struct VocabularyDetailSheet: View {
 
             if isLoadingImages {
                 HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AppTheme.Primary.p500)
+                    AppThemeLoadingView(customSize: 18)
                     Text("Đang tổng hợp 4–5 hình ảnh từ Google...")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)
