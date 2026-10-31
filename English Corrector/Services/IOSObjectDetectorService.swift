@@ -48,6 +48,14 @@ struct IOSDetectedObjectResult: Sendable {
     let isSaliencyMatched: Bool
 }
 
+/// Lightweight summary of an object detected on-device
+struct IOSDetectedObjectSummary: Sendable {
+    let word: String
+    let xPercent: Double
+    let yPercent: Double
+    let box2d: [Double]
+}
+
 final class IOSObjectDetectorService: Sendable {
     static let shared = IOSObjectDetectorService()
 
@@ -208,6 +216,68 @@ final class IOSObjectDetectorService: Sendable {
             onDeviceLabels: onDeviceLabels,
             isSaliencyMatched: isSaliencyMatched
         )
+    }
+
+    /// Scans the full image with Apple Vision Neural Engine to pre-detect physical objects and their exact coordinates before sending to AI
+    func scanAllObjectsInImage(from image: UIImage) -> [IOSDetectedObjectSummary] {
+        let normalizedImage = normalizeImageOrientation(image)
+        guard let cgImage = normalizedImage.cgImage else { return [] }
+
+        let saliencyRequest = VNGenerateObjectnessBasedSaliencyImageRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        guard (try? handler.perform([saliencyRequest])) != nil,
+              let observation = saliencyRequest.results?.first,
+              let salientObjects = observation.salientObjects else {
+            return []
+        }
+
+        var summaries: [IOSDetectedObjectSummary] = []
+        let sortedObjects = salientObjects.prefix(6)
+
+        for obj in sortedObjects {
+            let vBox = obj.boundingBox
+            let uiX = vBox.origin.x
+            let uiY = 1.0 - (vBox.origin.y + vBox.size.height)
+            let uiW = vBox.size.width
+            let uiH = vBox.size.height
+
+            let xPercent = max(2.0, min(98.0, (uiX + uiW / 2.0) * 100.0))
+            let yPercent = max(2.0, min(98.0, (uiY + uiH / 2.0) * 100.0))
+            let box2d: [Double] = [
+                Double(uiY * 100.0),
+                Double(uiX * 100.0),
+                Double((uiY + uiH) * 100.0),
+                Double((uiX + uiW) * 100.0)
+            ]
+
+            let pixelRect = CGRect(
+                x: uiX * CGFloat(cgImage.width),
+                y: uiY * CGFloat(cgImage.height),
+                width: max(10, uiW * CGFloat(cgImage.width)),
+                height: max(10, uiH * CGFloat(cgImage.height))
+            ).integral
+
+            var detectedWord = "object"
+            if let crop = cgImage.cropping(to: pixelRect) {
+                let classReq = VNClassifyImageRequest()
+                let h = VNImageRequestHandler(cgImage: crop, options: [:])
+                if (try? h.perform([classReq])) != nil,
+                   let top = classReq.results?.first(where: { $0.confidence > 0.05 }) {
+                    let raw = top.identifier
+                    let last = raw.components(separatedBy: ">").last ?? raw
+                    detectedWord = last.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+
+            summaries.append(IOSDetectedObjectSummary(
+                word: detectedWord,
+                xPercent: Double(xPercent),
+                yPercent: Double(yPercent),
+                box2d: box2d
+            ))
+        }
+
+        return summaries
     }
 
     // MARK: - Contour & Silhouette Detection

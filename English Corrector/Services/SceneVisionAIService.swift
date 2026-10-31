@@ -82,6 +82,12 @@ final class SceneVisionAIService {
         userPrompt: String? = nil
     ) async throws -> AISceneDescriptionResponse {
 
+        // 0. Pre-detect objects on-device with Apple Vision Neural Engine first
+        var preDetectedObjects: [IOSDetectedObjectSummary] = []
+        if let uiImg = UIImage(data: imageData) {
+            preDetectedObjects = IOSObjectDetectorService.shared.scanAllObjectsInImage(from: uiImg)
+        }
+
         // 1. Try Groq Vision first
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
@@ -89,6 +95,7 @@ final class SceneVisionAIService {
                 return try await describeSceneWithGroq(
                     imageData: imageData,
                     userPrompt: userPrompt,
+                    preDetected: preDetectedObjects,
                     apiKey: groqKey
                 )
             } catch {
@@ -105,6 +112,7 @@ final class SceneVisionAIService {
         return try await describeSceneWithGemini(
             imageData: imageData,
             userPrompt: userPrompt,
+            preDetected: preDetectedObjects,
             apiKey: geminiKey
         )
     }
@@ -197,12 +205,20 @@ final class SceneVisionAIService {
     private func describeSceneWithGroq(
         imageData: Data,
         userPrompt: String?,
+        preDetected: [IOSDetectedObjectSummary] = [],
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
         let processedData = optimizeImageForVision(imageData: imageData)
         let base64String = processedData.base64EncodedString()
         let dataUri = "data:image/jpeg;base64,\(base64String)"
+
+        let preDetectedBlock = preDetected.isEmpty ? "" : """
+
+        Apple Vision Neural Engine pre-detected these physical objects with exact visual coordinates:
+        \(preDetected.map { "- \($0.word) at horizontal: \(Int($0.xPercent))%, vertical: \(Int($0.yPercent))%, bbox: \($0.box2d)" }.joined(separator: "\n"))
+        Please include and prioritize these exact object locations in your objectsDetected array.
+        """
 
         let systemInstruction = """
         You are an expert English language coach analyzing real-world camera photos to help Vietnamese learners discover English vocabulary, natural descriptive sentences, and conversational expressions.
@@ -233,7 +249,7 @@ final class SceneVisionAIService {
         - "point": [x, y] is the EXACT physical center of that object on the image, where x is percentage (0-100) from left to right, and y is percentage (0-100) from top to bottom.
         - "box_2d": [ymin, xmin, ymax, xmax] is the bounding box coordinates on a 0-1000 scale.
         Be extremely precise so the leader pointer points directly at the object.
-        """
+        """ + preDetectedBlock
 
         let promptText: String
         if let userPrompt, !userPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -538,11 +554,19 @@ final class SceneVisionAIService {
     private func describeSceneWithGemini(
         imageData: Data,
         userPrompt: String?,
+        preDetected: [IOSDetectedObjectSummary] = [],
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
         let processedData = optimizeImageForVision(imageData: imageData)
         let base64String = processedData.base64EncodedString()
+
+        let preDetectedBlock = preDetected.isEmpty ? "" : """
+
+        Apple Vision Neural Engine pre-detected these physical objects with exact visual coordinates:
+        \(preDetected.map { "- \($0.word) at horizontal: \(Int($0.xPercent))%, vertical: \(Int($0.yPercent))%, bbox: \($0.box2d)" }.joined(separator: "\n"))
+        Please incorporate these objects into your objectsDetected array with their exact points.
+        """
 
         let systemInstruction = """
         You are an expert English language coach analyzing real-world camera photos to help Vietnamese learners discover English vocabulary, natural descriptive sentences, and conversational expressions.
@@ -561,7 +585,7 @@ final class SceneVisionAIService {
           * "exampleInContext": A short, practical English sentence using this word in the context of the photo.
         - "situationalConversationalPhrases": 2 to 4 natural conversational English phrases or questions someone might say in this situation/setting.
         - "adviceOrCulturalNote": A helpful brief tip in Vietnamese about vocabulary nuance or cultural communication in this setting.
-        """
+        """ + preDetectedBlock
 
         let promptText: String
         if let userPrompt, !userPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

@@ -900,6 +900,8 @@ struct InteractiveSceneImageViewerSheet: View {
         }
 
         Task {
+            var createdItemId: String? = nil
+
             do {
                 // 1. Instant on-device Apple Vision detection (~15ms)
                 let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
@@ -908,7 +910,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     yPercent: clampedY
                 )
 
-                // 2. Animate the Crop / Lift effect immediately on screen
+                // 2. NHẬN BIẾT VẬT THỂ TRƯỚC (On-Device Instant Recognition) & Animate Crop/Lift
                 await MainActor.run {
                     let box = detected.boundingBoxPercent
                     let rect = CGRect(
@@ -935,6 +937,24 @@ struct InteractiveSceneImageViewerSheet: View {
                         contourLoops: detected.contourLoops
                     )
 
+                    // Hiển thị ngay từ vựng nhận biết bởi Apple Vision Neural Engine (0s chờ đợi)
+                    let onDeviceWord = detected.onDeviceLabels.first?.capitalized ?? "Vật thể"
+                    let preliminaryItem = AISceneObjectVocabularyItem(
+                        word: onDeviceWord,
+                        phonetic: "",
+                        partOfSpeech: "Noun",
+                        vietnameseMeaning: "AI đang bổ sung nghĩa tiếng Việt & ví dụ...",
+                        exampleInContext: "",
+                        xPercent: Double(detected.refinedCenterPercent.x),
+                        yPercent: Double(detected.refinedCenterPercent.y),
+                        box2d: detected.box2dGrounding
+                    )
+
+                    createdItemId = preliminaryItem.id
+                    currentScene.objectsDetected.append(preliminaryItem)
+                    selectedObject = preliminaryItem
+                    objectThumbnails[preliminaryItem.id] = detected.cutoutImage ?? detected.croppedImage
+
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
 
                     withAnimation(.spring(response: 0.38, dampingFraction: 0.65)) {
@@ -942,11 +962,23 @@ struct InteractiveSceneImageViewerSheet: View {
                     }
                 }
 
-                // 3. Multimodal AI Analysis with Groq / Gemini in parallel
+                // 3. ĐƯA CHO AI NHẬN BIẾT & LÀM GIÀU DỮ LIỆU SAU (Background Multimodal AI Enrichment)
                 let newItem = try await SceneVisionAIService.shared.identifyObject(from: detected)
 
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+                    // Cập nhật item sơ bộ bằng dữ liệu AI hoàn chỉnh
+                    if let targetId = createdItemId,
+                       let idx = currentScene.objectsDetected.firstIndex(where: { $0.id == targetId }) {
+                        currentScene.objectsDetected[idx] = newItem
+                        if selectedObject?.id == targetId {
+                            selectedObject = newItem
+                        }
+                    } else {
+                        currentScene.objectsDetected.append(newItem)
+                        selectedObject = newItem
+                    }
 
                     // Save cropped/cutout thumbnail for persistent display in vocabulary card
                     objectThumbnails[newItem.id] = detected.cutoutImage ?? detected.croppedImage
@@ -956,8 +988,6 @@ struct InteractiveSceneImageViewerSheet: View {
                         activeLiftedCrop?.isAICompleted = true
                         isDetectingObject = false
                         detectingPoint = nil
-                        currentScene.objectsDetected.append(newItem)
-                        selectedObject = newItem
                     }
 
                     // Keep cropped overlay briefly for settling before removing
@@ -971,17 +1001,30 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
             } catch {
                 await MainActor.run {
-                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    // Nếu AI lỗi mạng, người dùng vẫn giữ nguyên vật thể đã nhận biết từ máy!
+                    if let targetId = createdItemId,
+                       let idx = currentScene.objectsDetected.firstIndex(where: { $0.id == targetId }) {
+                        let current = currentScene.objectsDetected[idx]
+                        let fallbackItem = AISceneObjectVocabularyItem(
+                            word: current.word,
+                            phonetic: "",
+                            partOfSpeech: current.partOfSpeech,
+                            vietnameseMeaning: "Đã nhận diện từ thiết bị (AI tạm ngưng kết nối)",
+                            exampleInContext: "",
+                            xPercent: current.xPercent,
+                            yPercent: current.yPercent,
+                            box2d: current.box2d
+                        )
+                        currentScene.objectsDetected[idx] = fallbackItem
+                        if selectedObject?.id == targetId {
+                            selectedObject = fallbackItem
+                        }
+                    }
+
                     withAnimation {
                         isDetectingObject = false
                         detectingPoint = nil
                         activeLiftedCrop = nil
-                        detectionErrorMessage = "Không thể nhận diện vật thể tại điểm này. Vui lòng thử lại."
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        withAnimation {
-                            detectionErrorMessage = nil
-                        }
                     }
                 }
             }
@@ -1177,6 +1220,16 @@ struct InteractiveSceneImageViewerSheet: View {
                     .font(.caption)
                     .italic()
                     .foregroundStyle(.white.opacity(0.85))
+            } else if item.vietnameseMeaning.contains("AI đang") {
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .tint(AppTheme.Accent.a500)
+                    Text("AI đang bổ sung phiên âm IPA & câu ví dụ...")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(AppTheme.Neutral.n400)
+                }
+                .padding(.top, 2)
             }
         }
         .padding(12)
