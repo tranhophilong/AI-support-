@@ -349,6 +349,7 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
         case vietnameseMeaningAlt = "vietnameseMeaning"
         case exampleInContext = "example_in_context"
         case exampleInContextAlt = "exampleInContext"
+        case point
         case xPercent
         case xPercentAlt = "x_percent"
         case yPercent
@@ -388,17 +389,47 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
             ?? (try? container.decode(String.self, forKey: .exampleInContextAlt))
             ?? ""
 
-        let decodedBox = (try? container.decode([Double].self, forKey: .box2d))
-            ?? (try? container.decode([Double].self, forKey: .box2dAlt))
-            ?? (try? container.decode([Double].self, forKey: .bbox))
-            ?? (try? container.decode([Double].self, forKey: .box))
+        func normalizeCoordinate(_ val: Double) -> Double {
+            if val > 100.0 {
+                return max(0.0, min(100.0, val / 10.0))
+            } else if val <= 1.0 && val > 0.0 {
+                return max(0.0, min(100.0, val * 100.0))
+            } else {
+                return max(0.0, min(100.0, val))
+            }
+        }
+
+        var decodedPoint: [Double]? = nil
+        if let pt = try? container.decode([Double].self, forKey: .point) {
+            decodedPoint = pt
+        } else if let intPt = try? container.decode([Int].self, forKey: .point) {
+            decodedPoint = intPt.map { Double($0) }
+        }
+
+        var decodedBox: [Double]? = nil
+        let boxKeys: [CodingKeys] = [.box2d, .box2dAlt, .bbox, .box]
+        for key in boxKeys {
+            if let d = try? container.decode([Double].self, forKey: key) {
+                decodedBox = d
+                break
+            }
+            if let ints = try? container.decode([Int].self, forKey: key) {
+                decodedBox = ints.map { Double($0) }
+                break
+            }
+        }
         self.box2d = decodedBox
 
         var computedX: Double?
         var computedY: Double?
 
-        // Visual grounding box calculation [ymin, xmin, ymax, xmax]
-        if let box = decodedBox, box.count >= 4 {
+        // 1. Try point: [x, y]
+        if let pt = decodedPoint, pt.count >= 2 {
+            computedX = normalizeCoordinate(pt[0])
+            computedY = normalizeCoordinate(pt[1])
+        }
+        // 2. Try visual grounding box [ymin, xmin, ymax, xmax]
+        else if let box = decodedBox, box.count >= 4 {
             let ymin = box[0]
             let xmin = box[1]
             let ymax = box[2]
@@ -407,48 +438,39 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
             let midX = (xmin + xmax) / 2.0
             let midY = (ymin + ymax) / 2.0
 
-            if max(xmax, ymax) > 100.0 {
-                // 0-1000 scale (standard Qwen/Groq visual grounding)
-                computedX = max(0.0, min(100.0, midX / 10.0))
-                computedY = max(0.0, min(100.0, midY / 10.0))
-            } else if max(xmax, ymax) <= 1.0 && max(xmax, ymax) > 0.0 {
-                // 0-1 scale
-                computedX = max(0.0, min(100.0, midX * 100.0))
-                computedY = max(0.0, min(100.0, midY * 100.0))
-            } else {
-                // 0-100 scale
-                computedX = max(0.0, min(100.0, midX))
-                computedY = max(0.0, min(100.0, midY))
-            }
+            computedX = normalizeCoordinate(midX)
+            computedY = normalizeCoordinate(midY)
         }
 
         if let computedX, let computedY {
             self.xPercent = computedX
             self.yPercent = computedY
         } else {
+            // 3. Try raw xPercent / yPercent with automatic normalization
+            var rawX: Double? = nil
             if let x = try? container.decode(Double.self, forKey: .xPercent) {
-                self.xPercent = x
+                rawX = x
             } else if let x = try? container.decode(Double.self, forKey: .xPercentAlt) {
-                self.xPercent = x
+                rawX = x
             } else if let xInt = try? container.decode(Int.self, forKey: .xPercent) {
-                self.xPercent = Double(xInt)
+                rawX = Double(xInt)
             } else if let xInt = try? container.decode(Int.self, forKey: .xPercentAlt) {
-                self.xPercent = Double(xInt)
-            } else {
-                self.xPercent = nil
+                rawX = Double(xInt)
             }
 
+            var rawY: Double? = nil
             if let y = try? container.decode(Double.self, forKey: .yPercent) {
-                self.yPercent = y
+                rawY = y
             } else if let y = try? container.decode(Double.self, forKey: .yPercentAlt) {
-                self.yPercent = y
+                rawY = y
             } else if let yInt = try? container.decode(Int.self, forKey: .yPercent) {
-                self.yPercent = Double(yInt)
+                rawY = Double(yInt)
             } else if let yInt = try? container.decode(Int.self, forKey: .yPercentAlt) {
-                self.yPercent = Double(yInt)
-            } else {
-                self.yPercent = nil
+                rawY = Double(yInt)
             }
+
+            self.xPercent = rawX.map { normalizeCoordinate($0) }
+            self.yPercent = rawY.map { normalizeCoordinate($0) }
         }
     }
 

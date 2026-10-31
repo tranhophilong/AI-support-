@@ -482,9 +482,7 @@ struct InteractiveSceneImageViewerSheet: View {
                 ZStack {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFit()
                         .frame(width: fittedRect.width, height: fittedRect.height)
-                        .position(x: fittedRect.midX, y: fittedRect.midY)
                         .onTapGesture {
                             withAnimation {
                                 selectedObject = nil
@@ -495,7 +493,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     ForEach(Array(scene.objectsDetected.enumerated()), id: \.element.id) { index, item in
                         let isSelected = (selectedObject?.id == item.id)
                         if showAllLabels || isSelected {
-                            let layout = computePinLayout(for: item, index: index, fittedRect: fittedRect)
+                            let layout = computePinLayout(for: item, index: index, imageSize: fittedRect.size)
                             let accentColor = isSelected ? AppTheme.Semantic.warning : AppTheme.Primary.p500
 
                             CurvedLeaderArrowView(
@@ -511,7 +509,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     // 2. Object Bullseye Target Dots
                     ForEach(Array(scene.objectsDetected.enumerated()), id: \.element.id) { index, item in
                         let isSelected = (selectedObject?.id == item.id)
-                        let layout = computePinLayout(for: item, index: index, fittedRect: fittedRect)
+                        let layout = computePinLayout(for: item, index: index, imageSize: fittedRect.size)
 
                         targetDotView(isSelected: isSelected)
                             .frame(width: 34, height: 34)
@@ -528,7 +526,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     ForEach(Array(scene.objectsDetected.enumerated()), id: \.element.id) { index, item in
                         let isSelected = (selectedObject?.id == item.id)
                         if showAllLabels || isSelected {
-                            let layout = computePinLayout(for: item, index: index, fittedRect: fittedRect)
+                            let layout = computePinLayout(for: item, index: index, imageSize: fittedRect.size)
                             let accentColor = isSelected ? AppTheme.Semantic.warning : AppTheme.Primary.p500
 
                             calloutBadge(item: item, isSelected: isSelected, accentColor: accentColor)
@@ -541,6 +539,8 @@ struct InteractiveSceneImageViewerSheet: View {
                         }
                     }
                 }
+                .frame(width: fittedRect.width, height: fittedRect.height)
+                .position(x: fittedRect.midX, y: fittedRect.midY)
                 .scaleEffect(scale)
                 .offset(offset)
 
@@ -682,12 +682,12 @@ struct InteractiveSceneImageViewerSheet: View {
     private func computePinLayout(
         for item: AISceneObjectVocabularyItem,
         index: Int,
-        fittedRect: CGRect
+        imageSize: CGSize
     ) -> PinLayout {
         let coords = resolvedCoordinates(for: item, index: index, total: scene.objectsDetected.count)
-        let pinX = fittedRect.minX + fittedRect.width * (coords.x / 100.0)
-        let pinY = fittedRect.minY + fittedRect.height * (coords.y / 100.0)
-        let targetPoint = CGPoint(x: pinX, y: pinY)
+        let targetX = imageSize.width * (coords.x / 100.0)
+        let targetY = imageSize.height * (coords.y / 100.0)
+        let targetPoint = CGPoint(x: targetX, y: targetY)
 
         let isRightSide = (coords.x >= 50.0)
         let dx: CGFloat = isRightSide ? -75.0 : 75.0
@@ -696,17 +696,17 @@ struct InteractiveSceneImageViewerSheet: View {
         let stagger: CGFloat = (index % 2 == 0) ? 0 : (isTopHalf ? -16.0 : 16.0)
         let dy: CGFloat = (isTopHalf ? -55.0 : 55.0) + stagger
 
-        let badgeX = min(fittedRect.maxX - 55, max(fittedRect.minX + 55, pinX + dx))
-        let badgeY = min(fittedRect.maxY - 25, max(fittedRect.minY + 25, pinY + dy))
+        let badgeX = min(imageSize.width + 25, max(-25, targetX + dx))
+        let badgeY = min(imageSize.height + 20, max(-20, targetY + dy))
         let badgeCenter = CGPoint(x: badgeX, y: badgeY)
 
         let startPoint: CGPoint
-        if badgeX < pinX - 15 {
+        if badgeX < targetX - 15 {
             startPoint = CGPoint(x: badgeX + 38, y: badgeY)
-        } else if badgeX > pinX + 15 {
+        } else if badgeX > targetX + 15 {
             startPoint = CGPoint(x: badgeX - 38, y: badgeY)
         } else {
-            startPoint = CGPoint(x: badgeX, y: (badgeY < pinY) ? badgeY + 16 : badgeY - 16)
+            startPoint = CGPoint(x: badgeX, y: (badgeY < targetY) ? badgeY + 16 : badgeY - 16)
         }
 
         let controlPoint = CGPoint(
@@ -913,9 +913,30 @@ struct InteractiveSceneImageViewerSheet: View {
         return CGRect(x: xOffset, y: yOffset, width: scaledWidth, height: scaledHeight)
     }
 
+    private func normalizeCoord(_ val: Double) -> Double {
+        if val > 100.0 {
+            return max(0.0, min(100.0, val / 10.0))
+        } else if val <= 1.0 && val > 0.0 {
+            return max(0.0, min(100.0, val * 100.0))
+        } else {
+            return max(0.0, min(100.0, val))
+        }
+    }
+
     private func resolvedCoordinates(for item: AISceneObjectVocabularyItem, index: Int, total: Int) -> (x: Double, y: Double) {
-        if let x = item.xPercent, let y = item.yPercent, (0...100).contains(x), (0...100).contains(y) {
-            return (x, y)
+        if let rawX = item.xPercent, let rawY = item.yPercent {
+            let x = normalizeCoord(rawX)
+            let y = normalizeCoord(rawY)
+            if (0...100).contains(x) && (0...100).contains(y) && (x > 0 || y > 0) {
+                return (x, y)
+            }
+        }
+        if let box = item.box2d, box.count >= 4 {
+            let midX = normalizeCoord((box[1] + box[3]) / 2.0)
+            let midY = normalizeCoord((box[0] + box[2]) / 2.0)
+            if (0...100).contains(midX) && (0...100).contains(midY) && (midX > 0 || midY > 0) {
+                return (midX, midY)
+            }
         }
         let cols = min(3, max(1, total))
         let col = index % cols

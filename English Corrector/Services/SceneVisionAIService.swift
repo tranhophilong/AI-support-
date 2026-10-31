@@ -131,9 +131,8 @@ final class SceneVisionAIService {
           "objectsDetected": [
             {
               "word": "English noun or noun phrase",
+              "point": [x, y],
               "box_2d": [ymin, xmin, ymax, xmax],
-              "xPercent": 45,
-              "yPercent": 50,
               "phonetic": "/IPA pronunciation/",
               "partOfSpeech": "Noun/Verb/etc",
               "vietnameseMeaning": "Clear Vietnamese meaning",
@@ -146,8 +145,11 @@ final class SceneVisionAIService {
           ],
           "adviceOrCulturalNote": "Brief tip in Vietnamese about vocabulary nuance or cultural communication in this setting."
         }
-        CRITICAL FOR OBJECT ACCURACY:
-        For each object in "objectsDetected", you MUST provide "box_2d": [ymin, xmin, ymax, xmax] normalized on a 0-1000 scale (0 is top/left, 1000 is bottom/right) indicating the exact visual bounding box of the object in the image. Also set "xPercent" and "yPercent" (0-100) as the center coordinates.
+        CRITICAL ACCURACY REQUIREMENT FOR OBJECT TARGETING:
+        For every object detected, you MUST pinpoint its exact location:
+        - "point": [x, y] is the EXACT physical center of that object on the image, where x is percentage (0-100) from left to right, and y is percentage (0-100) from top to bottom.
+        - "box_2d": [ymin, xmin, ymax, xmax] is the bounding box coordinates on a 0-1000 scale.
+        Be extremely precise so the leader pointer points directly at the object.
         """
 
         let promptText: String
