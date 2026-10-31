@@ -8,11 +8,15 @@
 import UIKit
 import Vision
 import CoreGraphics
+import CoreImage
 
-/// Result of on-device iOS object detection and intelligent cropping
+/// Result of on-device iOS object detection, intelligent cropping, and contour boundary extraction
 struct IOSDetectedObjectResult: Sendable {
     /// The high-resolution cropped image isolating the targeted object
     let croppedImage: UIImage
+
+    /// Isolated cutout with background removed (transparent background) if foreground instance masking succeeded
+    let cutoutImage: UIImage?
 
     /// Compressed JPEG data (~25-60KB) ready for multimodal AI vision analysis
     let croppedImageData: Data
@@ -33,6 +37,9 @@ struct IOSDetectedObjectResult: Sendable {
             boundingBoxPercent.maxX
         ]
     }
+
+    /// Detected curved and rounded border contour loops of the object in normalized 0...1 Vision space
+    let contourLoops: [[CGPoint]]
 
     /// On-device classification keywords detected by Apple Vision Neural Engine (e.g. ["mug", "coffee cup"])
     let onDeviceLabels: [String]
@@ -175,7 +182,13 @@ final class IOSObjectDetectorService: Sendable {
             throw AIServiceError.apiError(provider: "Vision", message: "Lỗi nén ảnh vật thể")
         }
 
-        // 7. Fast On-Device Classification (runs in <15ms on Neural Engine)
+        // 7. Extract Object Curves & Contours via Apple Vision Contour Detection
+        let contourLoops = extractContourLoops(for: croppedCG)
+
+        // 8. Extract Foreground Subject Cutout (Subject Lifting / background removal)
+        let cutoutImage = extractForegroundCutout(for: croppedCG)
+
+        // 9. Fast On-Device Classification (runs in <15ms on Neural Engine)
         let onDeviceLabels = detectOnDeviceLabels(for: croppedCG)
 
         let boundingBoxPercent = CGRect(
@@ -187,15 +200,79 @@ final class IOSObjectDetectorService: Sendable {
 
         return IOSDetectedObjectResult(
             croppedImage: croppedUIImage,
+            cutoutImage: cutoutImage,
             croppedImageData: jpegData,
             refinedCenterPercent: refinedCenterPercent,
             boundingBoxPercent: boundingBoxPercent,
+            contourLoops: contourLoops,
             onDeviceLabels: onDeviceLabels,
             isSaliencyMatched: isSaliencyMatched
         )
     }
 
-    // MARK: - Private Helpers
+    // MARK: - Contour & Silhouette Detection
+
+    /// Detects the curved borders, corners, and contours of the physical object inside the cropped image
+    private func extractContourLoops(for cgImage: CGImage) -> [[CGPoint]] {
+        let contourRequest = VNDetectContoursRequest()
+        contourRequest.contrastAdjustment = 1.6
+        contourRequest.detectsDarkOnLight = false
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        guard (try? handler.perform([contourRequest])) != nil,
+              let observation = contourRequest.results?.first else {
+            return []
+        }
+
+        var loops: [[CGPoint]] = []
+
+        for top in observation.topLevelContours {
+            let box = top.normalizedPath.boundingBox
+            if box.width > 0.94 && box.height > 0.94 {
+                // Top-level contour encompasses the bounding rectangle; inspect its child contours
+                // which correspond directly to the physical object inside
+                for child in top.childContours {
+                    if child.pointCount >= 8 {
+                        let pts = child.normalizedPoints.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
+                        loops.append(pts)
+                    }
+                }
+            } else if top.pointCount >= 8 {
+                let pts = top.normalizedPoints.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
+                loops.append(pts)
+            }
+        }
+
+        // Limit to top 3 prominent contour loops to prevent visual clutter
+        return Array(loops.prefix(3))
+    }
+
+    /// Separates the subject from the background using Apple Foreground Instance Masking (iOS 17+)
+    private func extractForegroundCutout(for cgImage: CGImage) -> UIImage? {
+        if #available(iOS 17.0, *) {
+            let maskRequest = VNGenerateForegroundInstanceMaskRequest()
+            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+            guard (try? handler.perform([maskRequest])) != nil,
+                  let result = maskRequest.results?.first,
+                  !result.allInstances.isEmpty,
+                  let maskedBuffer = try? result.generateMaskedImage(
+                    ofInstances: result.allInstances,
+                    from: handler,
+                    croppedToInstancesExtent: false
+                  ) else {
+                return nil
+            }
+
+            let ciImage = CIImage(cvPixelBuffer: maskedBuffer)
+            let ciContext = CIContext(options: nil)
+            if let outputCG = ciContext.createCGImage(ciImage, from: ciImage.extent) {
+                return UIImage(cgImage: outputCG)
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Classification & Orientation
 
     /// Runs fast local classification on the cropped object
     private func detectOnDeviceLabels(for cgImage: CGImage) -> [String] {

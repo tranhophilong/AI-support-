@@ -926,11 +926,13 @@ struct InteractiveSceneImageViewerSheet: View {
 
                     activeLiftedCrop = LiftedCropState(
                         image: detected.croppedImage,
+                        cutoutImage: detected.cutoutImage,
                         rect: rect,
                         refinedCenter: refined,
                         isLifted: false,
                         isAICompleted: false,
-                        detectedLabels: detected.onDeviceLabels
+                        detectedLabels: detected.onDeviceLabels,
+                        contourLoops: detected.contourLoops
                     )
 
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
@@ -946,8 +948,8 @@ struct InteractiveSceneImageViewerSheet: View {
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
 
-                    // Save cropped thumbnail for persistent display in vocabulary card
-                    objectThumbnails[newItem.id] = detected.croppedImage
+                    // Save cropped/cutout thumbnail for persistent display in vocabulary card
+                    objectThumbnails[newItem.id] = detected.cutoutImage ?? detected.croppedImage
 
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         activeLiftedCrop?.isLifted = false
@@ -1344,11 +1346,13 @@ struct CurvedLeaderArrowView: View {
 struct LiftedCropState: Equatable, Identifiable {
     var id: String { "\(rect.origin.x)-\(rect.origin.y)" }
     let image: UIImage
+    let cutoutImage: UIImage?
     let rect: CGRect
     let refinedCenter: CGPoint
     var isLifted: Bool = false
     var isAICompleted: Bool = false
     var detectedLabels: [String] = []
+    var contourLoops: [[CGPoint]] = []
 }
 
 struct LiftedCropObjectOverlayView: View {
@@ -1359,29 +1363,53 @@ struct LiftedCropObjectOverlayView: View {
     @State private var pulseGlow: Bool = false
 
     var body: some View {
+        let displayImage = cropState.cutoutImage ?? cropState.image
+
         ZStack {
-            // Cutout Image with glowing border and elevation
-            Image(uiImage: cropState.image)
+            // 1. Cutout / Cropped Object Image with smooth rounded frame
+            Image(uiImage: displayImage)
                 .resizable()
                 .scaledToFill()
                 .frame(width: max(20, cropState.rect.width), height: max(20, cropState.rect.height))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                // 2. Exact Detected Contour Silhouette Outline (tracing the real object curves & corners)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    accentColor,
-                                    .white,
-                                    AppTheme.Primary.p300,
-                                    accentColor
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: cropState.isLifted ? 2.5 : 1.5
-                        )
+                    if !cropState.contourLoops.isEmpty {
+                        ContourSilhouettePathShape(loops: cropState.contourLoops)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        accentColor,
+                                        .white,
+                                        AppTheme.Primary.p300,
+                                        accentColor
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                style: StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round)
+                            )
+                            .shadow(color: accentColor.opacity(pulseGlow ? 0.9 : 0.45), radius: 8, x: 0, y: 0)
+                            .shadow(color: .white.opacity(0.85), radius: 3, x: 0, y: 0)
+                    } else {
+                        // Smooth rounded contour boundary fallback
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        accentColor,
+                                        .white,
+                                        AppTheme.Primary.p300,
+                                        accentColor
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: cropState.isLifted ? 2.5 : 1.5
+                            )
+                    }
                 }
+                // 3. Scanning light sweep across the object
                 .overlay {
                     GeometryReader { geo in
                         Rectangle()
@@ -1398,13 +1426,15 @@ struct LiftedCropObjectOverlayView: View {
                             )
                             .rotationEffect(.degrees(25))
                             .offset(x: shimmerPhase * geo.size.width)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
                 }
+                // 4. Viewfinder Corner Brackets
                 .overlay {
                     ViewfinderCornerBracketsView(color: accentColor)
                         .padding(-3)
                 }
+                // Elevation shadow & halo
                 .shadow(
                     color: Color.black.opacity(cropState.isLifted ? 0.7 : 0.2),
                     radius: cropState.isLifted ? 16 : 4,
@@ -1427,8 +1457,8 @@ struct LiftedCropObjectOverlayView: View {
                         .foregroundStyle(accentColor)
 
                     Text(cropState.detectedLabels.first != nil
-                         ? "Đã bóc tách: \(cropState.detectedLabels.first!.capitalized)"
-                         : "Đã bóc tách vật thể...")
+                         ? "Đã bóc tách viền: \(cropState.detectedLabels.first!.capitalized)"
+                         : "Đã bóc tách viền vật thể...")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
 
@@ -1458,6 +1488,36 @@ struct LiftedCropObjectOverlayView: View {
                 pulseGlow = true
             }
         }
+    }
+}
+
+// MARK: - Contour Silhouette Shape
+
+struct ContourSilhouettePathShape: Shape {
+    let loops: [[CGPoint]]
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+
+        for loop in loops {
+            guard let first = loop.first else { continue }
+            let start = CGPoint(
+                x: rect.minX + CGFloat(first.x) * rect.width,
+                y: rect.minY + (1.0 - CGFloat(first.y)) * rect.height
+            )
+            path.move(to: start)
+
+            for pt in loop.dropFirst() {
+                let p = CGPoint(
+                    x: rect.minX + CGFloat(pt.x) * rect.width,
+                    y: rect.minY + (1.0 - CGFloat(pt.y)) * rect.height
+                )
+                path.addLine(to: p)
+            }
+            path.closeSubpath()
+        }
+
+        return path
     }
 }
 
