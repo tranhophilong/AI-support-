@@ -6,11 +6,17 @@
 import SwiftUI
 import SwiftData
 
+struct NewsWordPickTarget: Hashable, Equatable {
+    let sectionID: String
+    var mode: WordInteractionMode = .pickWord
+}
+
 struct NewsArticleReaderScreen: View {
     let article: NewsArticleItem
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query private var vocabularyNotes: [VocabularyNoteModel]
     @ObservedObject private var speechManager = SpeechSynthesizerManager.shared
 
     @State private var paragraphs: [String] = []
@@ -19,6 +25,10 @@ struct NewsArticleReaderScreen: View {
     @State private var isLoadingSummary = false
     @State private var showSummaryCard = true
     @State private var fontSizeMultiplier: CGFloat = 1.0 // 0.9, 1.0, 1.15
+
+    // Word Pick & Interaction State
+    @State private var pickingTarget: NewsWordPickTarget?
+    @State private var toastMessage: String?
 
     // Word Lookup & Sentence Analysis Popovers
     @State private var selectedWord: String?
@@ -34,6 +44,10 @@ struct NewsArticleReaderScreen: View {
     @State private var isPlayingAudio = false
     @State private var currentAudioParagraphIndex: Int = 0
     @State private var speechRate: Float = 1.0 // 0.8, 1.0, 1.2
+
+    private var savedVocabularyWords: Set<String> {
+        Set(vocabularyNotes.map(\.normalizedWord))
+    }
 
     var body: some View {
         NavigationStack {
@@ -62,6 +76,11 @@ struct NewsArticleReaderScreen: View {
 
                 if isPlayingAudio || speechManager.speakingText != nil {
                     audioPlayerBottomBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                if let toastMessage {
+                    toastBannerView(message: toastMessage)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -116,6 +135,7 @@ struct NewsArticleReaderScreen: View {
                             sentence: sentence,
                             onOpenFullAnalysis: {
                                 showSentenceAnalysisSheet = false
+                                openSentenceStructureAnalysis(for: sentence)
                             }
                         )
                         .navigationTitle("Phân tích cấu trúc câu")
@@ -170,10 +190,106 @@ struct NewsArticleReaderScreen: View {
             }
 
             // Headline
-            Text(article.title)
-                .font(.system(size: 24 * fontSizeMultiplier, weight: .bold, design: .serif))
-                .foregroundStyle(AppTheme.Neutral.n900)
-                .lineSpacing(4)
+            let headlineSectionID = "headline"
+            let isPickingHeadline = pickingTarget?.sectionID == headlineSectionID
+            let activeHeadlineMode = isPickingHeadline ? pickingTarget?.mode : nil
+
+            VStack(alignment: .leading, spacing: 8) {
+                if let activeMode = activeHeadlineMode {
+                    WordPickerText(
+                        text: article.title,
+                        mode: activeMode,
+                        foregroundStyle: AppTheme.Neutral.n900,
+                        chipBackground: AppTheme.Surface.card,
+                        modeBackground: AppTheme.Accent.a50,
+                        savedWords: savedVocabularyWords,
+                        onPick: { word in
+                            saveVocabulary(word, sourceText: article.title)
+                        },
+                        onDone: {
+                            pickingTarget = nil
+                        }
+                    )
+                } else {
+                    Text(article.title)
+                        .font(.system(size: 24 * fontSizeMultiplier, weight: .bold, design: .serif))
+                        .foregroundStyle(AppTheme.Neutral.n900)
+                        .lineSpacing(4)
+                        .contextMenu {
+                            itemContextMenu(text: article.title, sectionID: headlineSectionID)
+                        }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            speechManager.toggleSpeak(article.title)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "speaker.wave.1.fill")
+                                    .font(.caption2)
+                                Text("Nghe")
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(AppTheme.Neutral.n700)
+                        }
+
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                                pickingTarget = NewsWordPickTarget(sectionID: headlineSectionID, mode: .pickWord)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "hand.tap")
+                                    .font(.caption2)
+                                Text("Pick word")
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(AppTheme.Primary.p700)
+                        }
+
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                                pickingTarget = NewsWordPickTarget(sectionID: headlineSectionID, mode: .lightPickWord)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "character.book.closed.fill")
+                                    .font(.caption2)
+                                Text("Light pick")
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(AppTheme.Accent.a600)
+                        }
+
+                        Button {
+                            selectedSentenceForAnalysis = article.title
+                            showSentenceAnalysisSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "text.magnifyingglass")
+                                    .font(.caption2)
+                                Text("Ngữ pháp")
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(AppTheme.Primary.p500)
+                        }
+
+                        Button {
+                            copyText(article.title)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.caption2)
+                                Text("Copy")
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(AppTheme.Neutral.n500)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.top, 2)
+                }
+            }
 
             // Hero Image
             if let imgURL = article.imageURL, let url = URL(string: imgURL) {
@@ -243,17 +359,113 @@ struct NewsArticleReaderScreen: View {
             Divider()
 
             // 3 Takeaways (English + Vietnamese)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(summary.englishTakeaways.indices), id: \.self) { idx in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("•")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(AppTheme.Primary.p500)
+                    let englishText = summary.englishTakeaways[idx]
+                    let sectionID = "takeaway-\(idx)"
+                    let isPickingTakeaway = pickingTarget?.sectionID == sectionID
+                    let activeTakeawayMode = isPickingTakeaway ? pickingTarget?.mode : nil
 
-                            Text(summary.englishTakeaways[idx])
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(AppTheme.Neutral.n900)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let activeMode = activeTakeawayMode {
+                            WordPickerText(
+                                text: englishText,
+                                mode: activeMode,
+                                foregroundStyle: AppTheme.Neutral.n900,
+                                chipBackground: AppTheme.Surface.card,
+                                modeBackground: AppTheme.Accent.a50,
+                                savedWords: savedVocabularyWords,
+                                onPick: { word in
+                                    saveVocabulary(word, sourceText: englishText)
+                                },
+                                onDone: {
+                                    pickingTarget = nil
+                                }
+                            )
+                        } else {
+                            HStack(alignment: .top, spacing: 6) {
+                                Text("•")
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(AppTheme.Primary.p500)
+
+                                Text(englishText)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(AppTheme.Neutral.n900)
+                                    .contextMenu {
+                                        itemContextMenu(text: englishText, sectionID: sectionID)
+                                    }
+                            }
+
+                            // Quick helper action buttons for takeaway
+                            HStack(spacing: 12) {
+                                Button {
+                                    speechManager.toggleSpeak(englishText)
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "speaker.wave.1.fill")
+                                            .font(.system(size: 10))
+                                        Text("Nghe")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .foregroundStyle(AppTheme.Neutral.n700)
+                                }
+
+                                Button {
+                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                                        pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .pickWord)
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "hand.tap")
+                                            .font(.system(size: 10))
+                                        Text("Pick word")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .foregroundStyle(AppTheme.Primary.p700)
+                                }
+
+                                Button {
+                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                                        pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .lightPickWord)
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "character.book.closed.fill")
+                                            .font(.system(size: 10))
+                                        Text("Light pick")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .foregroundStyle(AppTheme.Accent.a600)
+                                }
+
+                                Button {
+                                    selectedSentenceForAnalysis = englishText
+                                    showSentenceAnalysisSheet = true
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "text.magnifyingglass")
+                                            .font(.system(size: 10))
+                                        Text("Ngữ pháp")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .foregroundStyle(AppTheme.Primary.p500)
+                                }
+
+                                Button {
+                                    copyText(englishText)
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "doc.on.doc")
+                                            .font(.system(size: 10))
+                                        Text("Copy")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .foregroundStyle(AppTheme.Neutral.n500)
+                                }
+
+                                Spacer()
+                            }
+                            .padding(.leading, 14)
                         }
 
                         if idx < summary.vietnameseTakeaways.count {
@@ -278,13 +490,21 @@ struct NewsArticleReaderScreen: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(summary.keyVocabulary) { vocab in
+                                let isSaved = savedVocabularyWords.contains(vocab.word.normalizedVocabularyWord)
+
                                 Button {
                                     lookupWordDirectly(vocab.word, contextSentence: vocab.contextExplanation)
                                 } label: {
                                     HStack(spacing: 4) {
+                                        if isSaved {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.caption2)
+                                                .foregroundStyle(AppTheme.Semantic.success)
+                                        }
+
                                         Text(vocab.word)
                                             .font(.caption.bold())
-                                            .foregroundStyle(AppTheme.Primary.p700)
+                                            .foregroundStyle(isSaved ? AppTheme.Semantic.success : AppTheme.Primary.p700)
                                         Text(vocab.phonetic)
                                             .font(.system(size: 9))
                                             .foregroundStyle(AppTheme.Neutral.n500)
@@ -294,13 +514,32 @@ struct NewsArticleReaderScreen: View {
                                     }
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 5)
-                                    .background(AppTheme.Primary.p50)
+                                    .background(isSaved ? AppTheme.Semantic.success.opacity(0.12) : AppTheme.Primary.p50)
                                     .clipShape(Capsule())
                                     .overlay {
-                                        Capsule().strokeBorder(AppTheme.Primary.p300.opacity(0.5), lineWidth: 0.5)
+                                        Capsule().strokeBorder(isSaved ? AppTheme.Semantic.success.opacity(0.5) : AppTheme.Primary.p300.opacity(0.5), lineWidth: 0.5)
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button {
+                                        speechManager.speak(vocab.word)
+                                    } label: {
+                                        Label("Phát âm", systemImage: "speaker.wave.2")
+                                    }
+
+                                    Button {
+                                        saveVocabulary(vocab.word, sourceText: vocab.contextExplanation)
+                                    } label: {
+                                        Label(isSaved ? "Đã lưu vào Sổ tay" : "Lưu vào Sổ tay", systemImage: isSaved ? "bookmark.fill" : "bookmark")
+                                    }
+
+                                    Button {
+                                        lookupWordDirectly(vocab.word, contextSentence: vocab.contextExplanation)
+                                    } label: {
+                                        Label("Xem chi tiết", systemImage: "character.book.closed.fill")
+                                    }
+                                }
                             }
                         }
                     }
@@ -357,57 +596,113 @@ struct NewsArticleReaderScreen: View {
     }
 
     private func paragraphCardView(index: Int, paragraph: String) -> some View {
+        let sectionID = "paragraph-\(index)"
         let isHighlighted = isPlayingAudio && currentAudioParagraphIndex == index
+        let isSpeakingThis = speechManager.speakingText == paragraph
+        let isPicking = pickingTarget?.sectionID == sectionID
+        let activeMode = isPicking ? pickingTarget?.mode : nil
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(paragraph)
-                .font(.system(size: 17 * fontSizeMultiplier, weight: .regular, design: .serif))
-                .foregroundStyle(AppTheme.Neutral.n900)
-                .lineSpacing(6 * fontSizeMultiplier)
-                .textSelection(.enabled)
-
-            // Paragraph helper actions
-            HStack(spacing: 12) {
-                Button {
-                    playSingleParagraphAudio(paragraph, index: index)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "speaker.wave.1.fill")
-                            .font(.caption2)
-                        Text("Nghe")
-                            .font(.caption2.bold())
+        return VStack(alignment: .leading, spacing: 10) {
+            if let activeMode {
+                WordPickerText(
+                    text: paragraph,
+                    mode: activeMode,
+                    foregroundStyle: AppTheme.Neutral.n900,
+                    chipBackground: AppTheme.Surface.card,
+                    modeBackground: AppTheme.Accent.a50,
+                    savedWords: savedVocabularyWords,
+                    onPick: { word in
+                        saveVocabulary(word, sourceText: paragraph)
+                    },
+                    onDone: {
+                        pickingTarget = nil
                     }
-                    .foregroundStyle(AppTheme.Neutral.n700)
-                }
-
-                Button {
-                    selectedSentenceForAnalysis = paragraph
-                    showSentenceAnalysisSheet = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.magnifyingglass")
-                            .font(.caption2)
-                        Text("Phân tích ngữ pháp")
-                            .font(.caption2.bold())
+                )
+            } else {
+                Text(paragraph)
+                    .font(.system(size: 17 * fontSizeMultiplier, weight: .regular, design: .serif))
+                    .foregroundStyle(AppTheme.Neutral.n900)
+                    .lineSpacing(6 * fontSizeMultiplier)
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        itemContextMenu(text: paragraph, sectionID: sectionID)
                     }
-                    .foregroundStyle(AppTheme.Primary.p500)
-                }
 
-                Button {
-                    inspectWordsInParagraph(paragraph)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "character.book.closed.fill")
-                            .font(.caption2)
-                        Text("Tra từ vựng")
-                            .font(.caption2.bold())
+                // Paragraph helper actions toolbar
+                HStack(spacing: 12) {
+                    Button {
+                        if isSpeakingThis {
+                            speechManager.stop()
+                        } else {
+                            playSingleParagraphAudio(paragraph, index: index)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: isSpeakingThis ? "stop.circle.fill" : "speaker.wave.1.fill")
+                                .font(.caption2)
+                            Text(isSpeakingThis ? "Dừng" : "Nghe")
+                                .font(.caption2.bold())
+                        }
+                        .foregroundStyle(isSpeakingThis ? AppTheme.Semantic.warning : AppTheme.Neutral.n700)
                     }
-                    .foregroundStyle(AppTheme.Accent.a600)
-                }
 
-                Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                            pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .pickWord)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "hand.tap")
+                                .font(.caption2)
+                            Text("Pick word")
+                                .font(.caption2.bold())
+                        }
+                        .foregroundStyle(AppTheme.Primary.p700)
+                    }
+
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                            pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .lightPickWord)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "character.book.closed.fill")
+                                .font(.caption2)
+                            Text("Light pick")
+                                .font(.caption2.bold())
+                        }
+                        .foregroundStyle(AppTheme.Accent.a600)
+                    }
+
+                    Button {
+                        selectedSentenceForAnalysis = paragraph
+                        showSentenceAnalysisSheet = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.magnifyingglass")
+                                .font(.caption2)
+                            Text("Phân tích")
+                                .font(.caption2.bold())
+                        }
+                        .foregroundStyle(AppTheme.Primary.p500)
+                    }
+
+                    Button {
+                        copyText(paragraph)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.caption2)
+                            Text("Copy")
+                                .font(.caption2.bold())
+                        }
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                    }
+
+                    Spacer()
+                }
+                .padding(.top, 4)
             }
-            .padding(.top, 4)
         }
         .padding(14)
         .background(isHighlighted ? AppTheme.Primary.p50 : Color.white)
@@ -712,9 +1007,112 @@ struct NewsArticleReaderScreen: View {
                 sourceText: selectedWordContext,
                 in: modelContext
             )
+            showToast("Đã lưu \"\(lookup.word)\" vào Sổ tay")
         } catch {
             // Handled
         }
+    }
+
+    // MARK: - Context Menu for News Items
+
+    @ViewBuilder
+    private func itemContextMenu(text: String, sectionID: String) -> some View {
+        Button {
+            speechManager.toggleSpeak(text)
+        } label: {
+            Label("Nghe phát âm", systemImage: "speaker.wave.2.fill")
+        }
+
+        Button {
+            copyText(text)
+        } label: {
+            Label("Sao chép", systemImage: "doc.on.doc")
+        }
+
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .pickWord)
+            }
+        } label: {
+            Label("Pick word", systemImage: "hand.tap")
+        }
+
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .lightPickWord)
+            }
+        } label: {
+            Label("Light pick word", systemImage: "character.book.closed.fill")
+        }
+
+        Button {
+            selectedSentenceForAnalysis = text
+            showSentenceAnalysisSheet = true
+        } label: {
+            Label("Light analysis", systemImage: "sparkles.rectangle.stack.fill")
+        }
+
+        Button {
+            openSentenceStructureAnalysis(for: text)
+        } label: {
+            Label("Phân tích cấu trúc câu", systemImage: "rectangle.3.group.fill")
+        }
+    }
+
+    // MARK: - Toast Banner & Helpers
+
+    private func toastBannerView(message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(AppTheme.Semantic.success)
+            Text(message)
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.85))
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 3)
+        .padding(.bottom, isPlayingAudio ? 80 : 20)
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+            toastMessage = message
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation(.easeOut(duration: 0.25)) {
+                if toastMessage == message {
+                    toastMessage = nil
+                }
+            }
+        }
+    }
+
+    private func saveVocabulary(_ word: String, sourceText: String) {
+        do {
+            _ = try VocabularyNoteStore.save(
+                word: word,
+                sourceText: sourceText,
+                sourceConversation: nil,
+                in: modelContext
+            )
+            showToast("Đã lưu \"\(word)\" vào Sổ tay từ vựng")
+        } catch {
+            print("DEBUG: Failed to save vocabulary: \(error)")
+        }
+    }
+
+    private func copyText(_ text: String) {
+        UIPasteboard.general.string = text
+        showToast("Đã sao chép nội dung")
+    }
+
+    private func openSentenceStructureAnalysis(for sentence: String) {
+        stopAudio()
+        dismiss()
+        StructureNavigationCoordinator.shared.openAndAnalyze(sentence)
     }
 
     // MARK: - TTS Audio Reading
