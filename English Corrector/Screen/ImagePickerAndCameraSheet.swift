@@ -6,12 +6,55 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import AVFoundation
+
+// MARK: - Camera Permission Helper
+
+final class CameraPermissionHelper {
+    enum CameraStatus {
+        case available
+        case notAvailable
+        case permissionDenied
+        case needsPermission
+    }
+
+    static func checkStatus() -> CameraStatus {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            return .notAvailable
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return .available
+        case .notDetermined:
+            return .needsPermission
+        case .denied, .restricted:
+            return .permissionDenied
+        @unknown default:
+            return .permissionDenied
+        }
+    }
+
+    static func requestPermission(completion: @escaping (Bool) -> Void) {
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            DispatchQueue.main.async {
+                completion(granted)
+            }
+        }
+    }
+}
 
 // MARK: - Camera Picker View (UIImagePickerController)
 
 struct CameraPickerView: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
+    var isPresented: Binding<Bool>?
     @Environment(\.dismiss) private var dismiss
+
+    init(selectedImage: Binding<UIImage?>, isPresented: Binding<Bool>? = nil) {
+        self._selectedImage = selectedImage
+        self.isPresented = isPresented
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -21,11 +64,14 @@ struct CameraPickerView: UIViewControllerRepresentable {
         let picker = UIImagePickerController()
         if UIImagePickerController.isSourceTypeAvailable(.camera) {
             picker.sourceType = .camera
+            picker.cameraCaptureMode = .photo
+            picker.cameraDevice = .rear
         } else {
             picker.sourceType = .photoLibrary
         }
         picker.delegate = context.coordinator
         picker.allowsEditing = false
+        picker.modalPresentationStyle = .fullScreen
         return picker
     }
 
@@ -43,13 +89,37 @@ struct CameraPickerView: UIViewControllerRepresentable {
             didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
             if let image = info[.originalImage] as? UIImage {
-                parent.selectedImage = image
+                let fixed = Self.fixOrientation(image)
+                parent.selectedImage = fixed
             }
-            parent.dismiss()
+            picker.dismiss(animated: true) { [weak self] in
+                guard let self else { return }
+                if let isPresented = self.parent.isPresented {
+                    isPresented.wrappedValue = false
+                } else {
+                    self.parent.dismiss()
+                }
+            }
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
+            picker.dismiss(animated: true) { [weak self] in
+                guard let self else { return }
+                if let isPresented = self.parent.isPresented {
+                    isPresented.wrappedValue = false
+                } else {
+                    self.parent.dismiss()
+                }
+            }
+        }
+
+        private static func fixOrientation(_ image: UIImage) -> UIImage {
+            if image.imageOrientation == .up { return image }
+            UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+            let normalized = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+            return normalized ?? image
         }
     }
 }

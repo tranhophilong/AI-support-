@@ -63,6 +63,8 @@ struct SituationAskScreen: View {
     @State private var selectedAttachedImage: UIImage?
     @State private var showCameraPicker = false
     @State private var showPhotosPicker = false
+    @State private var showCameraPermissionAlert = false
+    @State private var showCameraUnavailableAlert = false
     @State private var showHotNewsFeed = false
     @State private var photosPickerItem: PhotosPickerItem?
 
@@ -336,6 +338,28 @@ struct SituationAskScreen: View {
                         .foregroundStyle(AppTheme.Primary.p700)
                     }
                     .accessibilityLabel("Lịch sử hỏi đáp tình huống")
+                    .sheet(isPresented: $showHistorySheet) {
+                        SituationHistorySheet(
+                            sessions: sessions,
+                            activeSessionID: activeSession?.id,
+                            onSelectSession: { session in
+                                activeSession = session
+                                if let tone = SituationToneOption(rawValue: session.selectedTone) {
+                                    selectedTone = tone
+                                }
+                                showHistorySheet = false
+                            },
+                            onCreateNew: {
+                                startFreshSession()
+                                showHistorySheet = false
+                            },
+                            onDeleteSession: { session in
+                                deleteSession(session)
+                            }
+                        )
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                    }
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -395,34 +419,26 @@ struct SituationAskScreen: View {
                     }
                 }
             }
-            .fullScreenCover(isPresented: $showCameraPicker) {
-                CameraPickerView(selectedImage: $selectedAttachedImage)
-                    .ignoresSafeArea()
+            .alert("Cần quyền truy cập Camera", isPresented: $showCameraPermissionAlert) {
+                Button("Mở Cài đặt") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Hủy", role: .cancel) {}
+            } message: {
+                Text("Ứng dụng cần quyền Camera để chụp ảnh đồ vật và phân tích cảnh vật giúp bạn học từ vựng tiếng Anh. Vui lòng bật quyền Camera trong Cài đặt của máy.")
+            }
+            .alert("Camera không khả dụng", isPresented: $showCameraUnavailableAlert) {
+                Button("Chọn từ thư viện ảnh") {
+                    showPhotosPicker = true
+                }
+                Button("Đóng", role: .cancel) {}
+            } message: {
+                Text("Thiết bị này không có camera vật lý hoặc đang chạy trên trình giả lập Simulator. Bạn có thể chọn ảnh có sẵn từ thư viện ảnh.")
             }
             .sheet(isPresented: $showHotNewsFeed) {
                 HotNewsFeedScreen()
-            }
-            .sheet(isPresented: $showHistorySheet) {
-                SituationHistorySheet(
-                    sessions: sessions,
-                    activeSessionID: activeSession?.id,
-                    onSelectSession: { session in
-                        activeSession = session
-                        if let tone = SituationToneOption(rawValue: session.selectedTone) {
-                            selectedTone = tone
-                        }
-                        showHistorySheet = false
-                    },
-                    onCreateNew: {
-                        startFreshSession()
-                        showHistorySheet = false
-                    },
-                    onDeleteSession: { session in
-                        deleteSession(session)
-                    }
-                )
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
             }
             .onAppear {
                 if activeSession == nil {
@@ -648,7 +664,7 @@ struct SituationAskScreen: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Menu {
                     Button {
-                        showCameraPicker = true
+                        handleCameraTap()
                     } label: {
                         Label("Chụp ảnh mới", systemImage: "camera")
                     }
@@ -675,6 +691,10 @@ struct SituationAskScreen: View {
                 }
                 .disabled(isLoading)
                 .accessibilityLabel("Chụp hoặc chọn ảnh cảnh vật")
+                .fullScreenCover(isPresented: $showCameraPicker) {
+                    CameraPickerView(selectedImage: $selectedAttachedImage, isPresented: $showCameraPicker)
+                        .ignoresSafeArea()
+                }
 
                 TextField(
                     speechRecognizer.isRecording
@@ -1027,6 +1047,26 @@ struct SituationAskScreen: View {
     private func copyText(_ text: String) {
         UIPasteboard.general.string = text
         showStatusMessage("Đã sao chép")
+    }
+
+    private func handleCameraTap() {
+        let status = CameraPermissionHelper.checkStatus()
+        switch status {
+        case .available:
+            showCameraPicker = true
+        case .needsPermission:
+            CameraPermissionHelper.requestPermission { granted in
+                if granted {
+                    showCameraPicker = true
+                } else {
+                    showCameraPermissionAlert = true
+                }
+            }
+        case .permissionDenied:
+            showCameraPermissionAlert = true
+        case .notAvailable:
+            showCameraUnavailableAlert = true
+        }
     }
 
     private func toggleVoiceRecording() {
