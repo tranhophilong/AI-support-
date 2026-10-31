@@ -63,6 +63,7 @@ struct SituationAskScreen: View {
     @State private var selectedAttachedImage: UIImage?
     @State private var showCameraPicker = false
     @State private var showPhotosPicker = false
+    @State private var showHotNewsFeed = false
     @State private var photosPickerItem: PhotosPickerItem?
 
     @StateObject private var speechRecognizer = SpeechRecognizerManager()
@@ -338,6 +339,14 @@ struct SituationAskScreen: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showHotNewsFeed = true
+                    } label: {
+                        Image(systemName: "newspaper.fill")
+                            .foregroundStyle(AppTheme.Primary.p700)
+                    }
+                    .accessibilityLabel("Tin tức tiếng Anh nóng hổi")
+
                     Menu {
                         ForEach(AIModelOption.allCases) { option in
                             Button {
@@ -389,6 +398,9 @@ struct SituationAskScreen: View {
             .fullScreenCover(isPresented: $showCameraPicker) {
                 CameraPickerView(selectedImage: $selectedAttachedImage)
                     .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showHotNewsFeed) {
+                HotNewsFeedScreen()
             }
             .sheet(isPresented: $showHistorySheet) {
                 SituationHistorySheet(

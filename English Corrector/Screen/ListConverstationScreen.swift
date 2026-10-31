@@ -182,6 +182,7 @@ struct ListConversationScreen: View {
     @State private var showWidgetOnboarding = false
     @State private var showNotedAIScreen = false
     @State private var showVoiceRoleplaySheet = false
+    @State private var showHotNewsFeed = false
     @State private var activeVoiceConversation: ConversationModel?
 
     private var appThemeMode: AppThemeMode {
@@ -345,6 +346,15 @@ struct ListConversationScreen: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
                         Button {
+                            showHotNewsFeed = true
+                        } label: {
+                            Image(systemName: "newspaper.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.Primary.p700)
+                        }
+                        .accessibilityLabel("Tin tức tiếng Anh nóng hổi")
+
+                        Button {
                             showVoiceRoleplaySheet = true
                         } label: {
                             Image(systemName: "waveform.circle.fill")
@@ -376,6 +386,9 @@ struct ListConversationScreen: View {
             }
             .navigationDestination(isPresented: $showNotedAIScreen) {
                 NotedAIScreen()
+            }
+            .sheet(isPresented: $showHotNewsFeed) {
+                HotNewsFeedScreen()
             }
             .sheet(isPresented: $showVoiceRoleplaySheet) {
                 VoiceRoleplayPickerSheet { scenario in
