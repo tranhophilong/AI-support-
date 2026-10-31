@@ -154,9 +154,10 @@ struct ChatScreen: View {
 
                                     Group {
                                         if item.isUser {
-                                            let matchingScene = conversation.messages.first(where: {
+                                            let aiMessage = conversation.messages.first(where: {
                                                 !$0.isUser && $0.createdAt >= item.createdAt && $0.decodedSceneDescription != nil
-                                            })?.decodedSceneDescription
+                                            })
+                                            let matchingScene = aiMessage?.decodedSceneDescription
 
                                             UserBubble(
                                                 id: item.id,
@@ -172,6 +173,12 @@ struct ChatScreen: View {
                                                 },
                                                 isWordSaved: { word in
                                                     savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                                                },
+                                                onUpdateScene: { updatedScene in
+                                                    if let aiMsg = aiMessage {
+                                                        aiMsg.decodedSceneDescription = updatedScene
+                                                        try? context.save()
+                                                    }
                                                 },
                                                 pickingTarget: pickingTarget,
                                                 savedWords: savedVocabularyWords,
@@ -253,6 +260,10 @@ struct ChatScreen: View {
                                             SceneDescriptionCardView(
                                                 scene: scene,
                                                 imageData: item.imageData,
+                                                onUpdateScene: { updatedScene in
+                                                    item.decodedSceneDescription = updatedScene
+                                                    try? context.save()
+                                                },
                                                 onSaveWord: { wordItem in
                                                     saveVocabulary(
                                                         wordItem.word,

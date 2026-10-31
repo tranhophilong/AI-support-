@@ -488,11 +488,11 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
 }
 
 struct AISceneDescriptionResponse: Codable, Equatable {
-    let sceneOverview: String
-    let sceneVietnameseTranslation: String
-    let objectsDetected: [AISceneObjectVocabularyItem]
-    let situationalConversationalPhrases: [String]
-    let adviceOrCulturalNote: String?
+    var sceneOverview: String
+    var sceneVietnameseTranslation: String
+    var objectsDetected: [AISceneObjectVocabularyItem]
+    var situationalConversationalPhrases: [String]
+    var adviceOrCulturalNote: String?
 
     enum CodingKeys: String, CodingKey {
         case sceneOverview

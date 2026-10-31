@@ -109,6 +109,39 @@ final class SceneVisionAIService {
         )
     }
 
+    /// Identifies a specific object located at (xPercent, yPercent) in the image when user long-presses.
+    func identifyObjectAtPoint(
+        imageData: Data,
+        xPercent: Double,
+        yPercent: Double
+    ) async throws -> AISceneObjectVocabularyItem {
+        let groqKey = APIKeyStore.groqAPIKey
+        if !groqKey.isEmpty {
+            do {
+                return try await identifyObjectAtPointWithGroq(
+                    imageData: imageData,
+                    xPercent: xPercent,
+                    yPercent: yPercent,
+                    apiKey: groqKey
+                )
+            } catch {
+                print("DEBUG: Groq point identification failed: \(error). Falling back to Gemini...")
+            }
+        }
+
+        let geminiKey = APIKeyStore.geminiAPIKey
+        guard !geminiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey(provider: "Groq", keyName: "GROQ_API_KEY")
+        }
+
+        return try await identifyObjectAtPointWithGemini(
+            imageData: imageData,
+            xPercent: xPercent,
+            yPercent: yPercent,
+            apiKey: geminiKey
+        )
+    }
+
     // MARK: - Groq Vision Implementation (qwen/qwen3.8-27b)
 
     private func describeSceneWithGroq(
@@ -232,6 +265,117 @@ final class SceneVisionAIService {
         return try JSONDecoder().decode(AISceneDescriptionResponse.self, from: jsonData)
     }
 
+    private func identifyObjectAtPointWithGroq(
+        imageData: Data,
+        xPercent: Double,
+        yPercent: Double,
+        apiKey: String
+    ) async throws -> AISceneObjectVocabularyItem {
+        let processedData = optimizeImageForVision(imageData: imageData)
+        let base64String = processedData.base64EncodedString()
+        let dataUri = "data:image/jpeg;base64,\(base64String)"
+
+        let roundedX = Int(round(xPercent))
+        let roundedY = Int(round(yPercent))
+
+        let systemInstruction = """
+        You are an expert English vocabulary tutor and computer vision analyst.
+        The user has touched a specific location on the photo: horizontal position \(roundedX)% (from left: 0% to right: 100%) and vertical position \(roundedY)% (from top: 0% to bottom: 100%).
+        Identify the exact physical object, item, or distinctive element that the user is pointing at or touching at (\(roundedX)%, \(roundedY)%).
+
+        Respond ONLY with a valid JSON object strictly matching this schema:
+        {
+          "word": "English name of this object (e.g., 'ceramic mug', 'laptop trackpad', 'houseplant', 'vintage watch')",
+          "point": [\(roundedX), \(roundedY)],
+          "box_2d": [ymin, xmin, ymax, xmax],
+          "phonetic": "/IPA pronunciation/",
+          "partOfSpeech": "Noun",
+          "vietnameseMeaning": "Clear, natural Vietnamese translation of this object",
+          "exampleInContext": "A natural, helpful English sentence describing this object in this photo."
+        }
+        """
+
+        let promptText = "What is the specific object at coordinate (\(roundedX)%, \(roundedY)%) in this image? Provide its English vocabulary, IPA, Vietnamese meaning, and context sentence."
+
+        let requestPayload: [String: Any] = [
+            "model": groqVisionModel,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemInstruction
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": promptText
+                        ],
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": dataUri
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            "response_format": [
+                "type": "json_object"
+            ],
+            "temperature": 0.1
+        ]
+
+        guard let endpoint = URL(string: "https://api.groq.com/openai/v1/chat/completions") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown Groq error"
+            throw AIServiceError.requestFailed(
+                provider: "Groq",
+                statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500,
+                message: errorMsg
+            )
+        }
+
+        let responseBody = try JSONDecoder().decode(GroqChatCompletionResponse.self, from: data)
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(provider: "Groq", message: error.message)
+        }
+
+        guard let rawText = responseBody.choices?.first?.message.content else {
+            throw AIServiceError.emptyResponse(provider: "Groq")
+        }
+
+        let cleaned = Self.strippedMarkdownFence(from: rawText)
+        guard let jsonData = cleaned.data(using: .utf8) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        var item = try JSONDecoder().decode(AISceneObjectVocabularyItem.self, from: jsonData)
+        if item.xPercent == nil || item.yPercent == nil {
+            item = AISceneObjectVocabularyItem(
+                word: item.word,
+                phonetic: item.phonetic,
+                partOfSpeech: item.partOfSpeech,
+                vietnameseMeaning: item.vietnameseMeaning,
+                exampleInContext: item.exampleInContext,
+                xPercent: xPercent,
+                yPercent: yPercent,
+                box2d: item.box2d
+            )
+        }
+        return item
+    }
+
     // MARK: - Gemini Vision Fallback (gemini-2.5-flash)
 
     private func describeSceneWithGemini(
@@ -334,6 +478,112 @@ final class SceneVisionAIService {
         }
 
         return try JSONDecoder().decode(AISceneDescriptionResponse.self, from: jsonData)
+    }
+
+    private func identifyObjectAtPointWithGemini(
+        imageData: Data,
+        xPercent: Double,
+        yPercent: Double,
+        apiKey: String
+    ) async throws -> AISceneObjectVocabularyItem {
+        let processedData = optimizeImageForVision(imageData: imageData)
+        let base64String = processedData.base64EncodedString()
+
+        let roundedX = Int(round(xPercent))
+        let roundedY = Int(round(yPercent))
+
+        let systemInstruction = """
+        You are an expert English vocabulary tutor.
+        The user has touched a specific location on the photo: horizontal position \(roundedX)% (0-100 from left to right) and vertical position \(roundedY)% (0-100 from top to bottom).
+        Identify the exact physical object, item, or distinctive feature that the user touched at (\(roundedX)%, \(roundedY)%).
+
+        Respond ONLY with valid JSON strictly matching this schema:
+        {
+          "word": "English noun or noun phrase",
+          "point": [\(roundedX), \(roundedY)],
+          "box_2d": [ymin, xmin, ymax, xmax],
+          "phonetic": "/IPA pronunciation/",
+          "partOfSpeech": "Noun",
+          "vietnameseMeaning": "Clear, natural Vietnamese meaning",
+          "exampleInContext": "Helpful English sentence using this word in the photo context."
+        }
+        """
+
+        let promptText = "Identify the specific object at (\(roundedX)%, \(roundedY)%) in this photo."
+
+        let body = GeminiVisionContentRequest(
+            systemInstruction: GeminiVisionContent(
+                parts: [GeminiVisionPart(text: systemInstruction)]
+            ),
+            contents: [
+                GeminiVisionContent(
+                    parts: [
+                        GeminiVisionPart(text: promptText),
+                        GeminiVisionPart(
+                            inlineData: GeminiVisionInlineData(
+                                mimeType: "image/jpeg",
+                                data: base64String
+                            )
+                        )
+                    ]
+                )
+            ],
+            generationConfig: GeminiVisionGenerationConfig(
+                responseMimeType: "application/json",
+                responseSchema: nil
+            )
+        )
+
+        guard let endpoint = URL(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        ) else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200...299).contains(httpResponse.statusCode) {
+            throw AIServiceError.requestFailed(
+                provider: "Gemini",
+                statusCode: httpResponse.statusCode,
+                message: String(data: data, encoding: .utf8)
+            )
+        }
+
+        let responseBody = try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
+        if let error = responseBody.error {
+            throw AIServiceError.apiError(provider: "Gemini", message: error.message)
+        }
+
+        guard let rawText = responseBody.candidates?.first?.content?.parts.first?.text else {
+            throw AIServiceError.emptyResponse(provider: "Gemini")
+        }
+
+        let cleaned = Self.strippedMarkdownFence(from: rawText)
+        guard let jsonData = cleaned.data(using: .utf8) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        var item = try JSONDecoder().decode(AISceneObjectVocabularyItem.self, from: jsonData)
+        if item.xPercent == nil || item.yPercent == nil {
+            item = AISceneObjectVocabularyItem(
+                word: item.word,
+                phonetic: item.phonetic,
+                partOfSpeech: item.partOfSpeech,
+                vietnameseMeaning: item.vietnameseMeaning,
+                exampleInContext: item.exampleInContext,
+                xPercent: xPercent,
+                yPercent: yPercent,
+                box2d: item.box2d
+            )
+        }
+        return item
     }
 
     private static func strippedMarkdownFence(from content: String) -> String {

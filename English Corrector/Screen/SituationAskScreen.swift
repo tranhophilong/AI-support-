@@ -129,94 +129,8 @@ struct SituationAskScreen: View {
                                 } else {
                                     LazyVStack(spacing: 18) {
                                         ForEach(sortedMessages) { item in
-                                            Group {
-                                                if item.isUser {
-                                                    let matchingScene = sortedMessages.first(where: {
-                                                        !$0.isUser && $0.createdAt >= item.createdAt && $0.decodedSceneDescription != nil
-                                                    })?.decodedSceneDescription
-
-                                                    SituationUserBubble(
-                                                        message: item,
-                                                        sceneForImage: matchingScene,
-                                                        onSaveWord: { wordItem in
-                                                            saveVocabulary(
-                                                                wordItem.word,
-                                                                sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)"
-                                                            )
-                                                        },
-                                                        isWordSaved: { word in
-                                                            savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-                                                        },
-                                                        onCopy: {
-                                                            copyText(item.text)
-                                                        },
-                                                        onAskAgain: {
-                                                            inputText = item.text
-                                                        },
-                                                        onDelete: {
-                                                            deleteMessage(item)
-                                                        }
-                                                    )
-                                                } else if let scene = item.decodedSceneDescription {
-                                                    SceneDescriptionCardView(
-                                                        scene: scene,
-                                                        imageData: item.imageData,
-                                                        onSaveWord: { wordItem in
-                                                            saveVocabulary(
-                                                                wordItem.word,
-                                                                sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)"
-                                                            )
-                                                        },
-                                                        isWordSaved: { word in
-                                                            savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-                                                        }
-                                                    )
-                                                    .contextMenu {
-                                                        Button(action: {
-                                                            copyText(scene.sceneOverview)
-                                                        }) {
-                                                            Label("Sao chép mô tả", systemImage: "doc.on.doc")
-                                                        }
-                                                        Button(role: .destructive, action: {
-                                                            deleteMessage(item)
-                                                        }) {
-                                                            Label("Xoá", systemImage: "trash")
-                                                        }
-                                                    }
-                                                } else if let response = item.decodedResponse {
-                                                    SituationAIBubble(
-                                                        messageID: item.id,
-                                                        response: response,
-                                                        pickingTarget: pickingTarget,
-                                                        savedWords: savedVocabularyWords,
-                                                        onCopy: { text in
-                                                            copyText(text)
-                                                        },
-                                                        onSaveNote: { english, nuance in
-                                                            saveExpressionToNotedAI(english: english, nuance: nuance)
-                                                        },
-                                                        onSaveVocabulary: { word, sourceSentence in
-                                                            saveVocabulary(word, sourceText: sourceSentence)
-                                                        },
-                                                        onStartPickingWords: { target in
-                                                            pickingTarget = target
-                                                        },
-                                                        onStopPickingWords: {
-                                                            pickingTarget = nil
-                                                        },
-                                                        onSelectFollowUp: { followUp in
-                                                            sendQuestion(followUp)
-                                                        },
-                                                        onStartPractice: { scenario in
-                                                            startPracticeConversation(scenario)
-                                                        },
-                                                        onDelete: {
-                                                            deleteMessage(item)
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                            .id(item.id)
+                                            messageRowView(for: item)
+                                                .id(item.id)
                                         }
                                     }
                                     .padding(.horizontal, 16)
@@ -455,6 +369,106 @@ struct SituationAskScreen: View {
                     SpeechSynthesizerManager.shared.stop()
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func messageRowView(for item: SituationAskMessageModel) -> some View {
+        if item.isUser {
+            let aiMessage = sortedMessages.first(where: {
+                !$0.isUser && $0.createdAt >= item.createdAt && $0.decodedSceneDescription != nil
+            })
+            let matchingScene = aiMessage?.decodedSceneDescription
+
+            SituationUserBubble(
+                message: item,
+                sceneForImage: matchingScene,
+                onUpdateScene: { updatedScene in
+                    if let aiMessage = aiMessage {
+                        aiMessage.decodedSceneDescription = updatedScene
+                        try? context.save()
+                    }
+                },
+                onSaveWord: { wordItem in
+                    saveVocabulary(
+                        wordItem.word,
+                        sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)"
+                    )
+                },
+                isWordSaved: { word in
+                    savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                },
+                onCopy: {
+                    copyText(item.text)
+                },
+                onAskAgain: {
+                    inputText = item.text
+                },
+                onDelete: {
+                    deleteMessage(item)
+                }
+            )
+        } else if let scene = item.decodedSceneDescription {
+            SceneDescriptionCardView(
+                scene: scene,
+                imageData: item.imageData,
+                onUpdateScene: { updatedScene in
+                    item.decodedSceneDescription = updatedScene
+                    try? context.save()
+                },
+                onSaveWord: { wordItem in
+                    saveVocabulary(
+                        wordItem.word,
+                        sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)"
+                    )
+                },
+                isWordSaved: { word in
+                    savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                }
+            )
+            .contextMenu {
+                Button(action: {
+                    copyText(scene.sceneOverview)
+                }) {
+                    Label("Sao chép mô tả", systemImage: "doc.on.doc")
+                }
+                Button(role: .destructive, action: {
+                    deleteMessage(item)
+                }) {
+                    Label("Xoá", systemImage: "trash")
+                }
+            }
+        } else if let response = item.decodedResponse {
+            SituationAIBubble(
+                messageID: item.id,
+                response: response,
+                pickingTarget: pickingTarget,
+                savedWords: savedVocabularyWords,
+                onCopy: { text in
+                    copyText(text)
+                },
+                onSaveNote: { english, nuance in
+                    saveExpressionToNotedAI(english: english, nuance: nuance)
+                },
+                onSaveVocabulary: { word, sourceSentence in
+                    saveVocabulary(word, sourceText: sourceSentence)
+                },
+                onStartPickingWords: { target in
+                    pickingTarget = target
+                },
+                onStopPickingWords: {
+                    pickingTarget = nil
+                },
+                onSelectFollowUp: { followUp in
+                    sendQuestion(followUp)
+                },
+                onStartPractice: { scenario in
+                    startPracticeConversation(scenario)
+                },
+                onDelete: {
+                    deleteMessage(item)
+                }
+            )
         }
     }
 
@@ -1108,6 +1122,7 @@ struct SituationAskScreen: View {
 private struct SituationUserBubble: View {
     let message: SituationAskMessageModel
     var sceneForImage: AISceneDescriptionResponse? = nil
+    var onUpdateScene: ((AISceneDescriptionResponse) -> Void)? = nil
     var onSaveWord: ((AISceneObjectVocabularyItem) -> Void)? = nil
     var isWordSaved: ((String) -> Bool)? = nil
     let onCopy: () -> Void
@@ -1175,7 +1190,8 @@ private struct SituationUserBubble: View {
                                 image: uiImage,
                                 scene: scene,
                                 onSaveWord: onSaveWord,
-                                isWordSaved: isWordSaved
+                                isWordSaved: isWordSaved,
+                                onUpdateScene: onUpdateScene
                             )
                         }
                     }

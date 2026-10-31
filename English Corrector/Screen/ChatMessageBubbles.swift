@@ -14,6 +14,7 @@ struct UserBubble: View {
     var sceneForImage: AISceneDescriptionResponse? = nil
     var onSaveWord: ((AISceneObjectVocabularyItem) -> Void)? = nil
     var isWordSaved: ((String) -> Bool)? = nil
+    var onUpdateScene: ((AISceneDescriptionResponse) -> Void)? = nil
     let pickingTarget: WordPickTarget?
     let savedWords: Set<String>
     var isHighlightedMessage: Bool = false
@@ -93,7 +94,8 @@ struct UserBubble: View {
                                 image: uiImage,
                                 scene: scene,
                                 onSaveWord: onSaveWord,
-                                isWordSaved: isWordSaved
+                                isWordSaved: isWordSaved,
+                                onUpdateScene: onUpdateScene
                             )
                         }
                     }

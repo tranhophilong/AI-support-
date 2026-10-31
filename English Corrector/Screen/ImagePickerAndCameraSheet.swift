@@ -186,6 +186,7 @@ struct InputBarImagePreviewView: View {
 struct SceneDescriptionCardView: View {
     let scene: AISceneDescriptionResponse
     var imageData: Data? = nil
+    var onUpdateScene: ((AISceneDescriptionResponse) -> Void)? = nil
     let onSaveWord: ((AISceneObjectVocabularyItem) -> Void)?
     var isWordSaved: ((String) -> Bool)? = nil
 
@@ -257,7 +258,8 @@ struct SceneDescriptionCardView: View {
                 image: uiImage,
                 scene: scene,
                 onSaveWord: onSaveWord,
-                isWordSaved: isWordSaved
+                isWordSaved: isWordSaved,
+                onUpdateScene: onUpdateScene
             )
         }
     }
@@ -459,11 +461,19 @@ struct InteractiveSceneImageViewerSheet: View {
     let scene: AISceneDescriptionResponse
     let onSaveWord: ((AISceneObjectVocabularyItem) -> Void)?
     var isWordSaved: ((String) -> Bool)? = nil
+    var onUpdateScene: ((AISceneDescriptionResponse) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @State private var currentScene: AISceneDescriptionResponse
     @State private var selectedObject: AISceneObjectVocabularyItem?
     @State private var showAllLabels: Bool = true
     @State private var pulse: Bool = false
+
+    // Long-Press AI Object Detection States
+    @State private var isDetectingObject: Bool = false
+    @State private var detectingPoint: CGPoint? = nil
+    @State private var detectionErrorMessage: String? = nil
+    @State private var hasTriggeredLongPress: Bool = false
 
     // Zoom, Pan & Interactive Dismiss States
     @State private var scale: CGFloat = 1.0
@@ -471,6 +481,21 @@ struct InteractiveSceneImageViewerSheet: View {
     @State private var offset: CGSize = .zero
     @State private var baseOffset: CGSize = .zero
     @State private var dismissDragOffsetY: CGFloat = 0
+
+    init(
+        image: UIImage,
+        scene: AISceneDescriptionResponse,
+        onSaveWord: ((AISceneObjectVocabularyItem) -> Void)?,
+        isWordSaved: ((String) -> Bool)? = nil,
+        onUpdateScene: ((AISceneDescriptionResponse) -> Void)? = nil
+    ) {
+        self.image = image
+        self.scene = scene
+        self.onSaveWord = onSaveWord
+        self.isWordSaved = isWordSaved
+        self.onUpdateScene = onUpdateScene
+        self._currentScene = State(initialValue: scene)
+    }
 
     var body: some View {
         NavigationStack {
@@ -504,7 +529,7 @@ struct InteractiveSceneImageViewerSheet: View {
                 withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
                     pulse = true
                 }
-                if selectedObject == nil, let first = scene.objectsDetected.first {
+                if selectedObject == nil, let first = currentScene.objectsDetected.first {
                     selectedObject = first
                 }
             }
@@ -548,19 +573,38 @@ struct InteractiveSceneImageViewerSheet: View {
             ZStack {
                 Color.clear
 
-                // Zoomable & Pannable Canvas Content (Image + Pins + Arrows + Badges)
+                // Zoomable & Pannable Canvas Content (Image + Pins + Arrows + Badges + Detecting Radar)
                 ZStack {
                     Image(uiImage: image)
                         .resizable()
                         .frame(width: fittedRect.width, height: fittedRect.height)
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation {
                                 selectedObject = nil
                             }
                         }
+                        .gesture(
+                            LongPressGesture(minimumDuration: 0.45)
+                                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                                .onChanged { value in
+                                    switch value {
+                                    case .second(true, let drag):
+                                        if !hasTriggeredLongPress, let drag = drag {
+                                            hasTriggeredLongPress = true
+                                            handleLongPress(at: drag.location, in: fittedRect.size)
+                                        }
+                                    default:
+                                        break
+                                    }
+                                }
+                                .onEnded { _ in
+                                    hasTriggeredLongPress = false
+                                }
+                        )
 
                     // 1. Curved leader arrows connecting badge to target
-                    ForEach(Array(scene.objectsDetected.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(currentScene.objectsDetected.enumerated()), id: \.element.id) { index, item in
                         let isSelected = (selectedObject?.id == item.id)
                         if showAllLabels || isSelected {
                             let layout = computePinLayout(for: item, index: index, imageSize: fittedRect.size)
@@ -577,7 +621,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     }
 
                     // 2. Object Bullseye Target Dots
-                    ForEach(Array(scene.objectsDetected.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(currentScene.objectsDetected.enumerated()), id: \.element.id) { index, item in
                         let isSelected = (selectedObject?.id == item.id)
                         let layout = computePinLayout(for: item, index: index, imageSize: fittedRect.size)
 
@@ -593,7 +637,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     }
 
                     // 3. Floating Vocabulary Callout Badges
-                    ForEach(Array(scene.objectsDetected.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(currentScene.objectsDetected.enumerated()), id: \.element.id) { index, item in
                         let isSelected = (selectedObject?.id == item.id)
                         if showAllLabels || isSelected {
                             let layout = computePinLayout(for: item, index: index, imageSize: fittedRect.size)
@@ -608,11 +652,64 @@ struct InteractiveSceneImageViewerSheet: View {
                                 }
                         }
                     }
+
+                    // 4. Interactive Long-Press Detection Radar Ring
+                    if let point = detectingPoint, isDetectingObject {
+                        detectingRadarView
+                            .position(point)
+                    }
                 }
                 .frame(width: fittedRect.width, height: fittedRect.height)
                 .position(x: fittedRect.midX, y: fittedRect.midY)
                 .scaleEffect(scale)
                 .offset(offset)
+
+                // Hint Pill: "Nhấn đè vào đồ vật để AI nhận diện thêm"
+                if !isDetectingObject && currentScene.objectsDetected.count < 15 {
+                    VStack {
+                        HStack(spacing: 5) {
+                            Image(systemName: "hand.tap.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(AppTheme.Accent.a600)
+                            Text("Nhấn đè vào đồ vật bất kỳ để AI nhận diện thêm")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.85))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.65))
+                        .clipShape(Capsule())
+                        .overlay {
+                            Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
+                        }
+                        .padding(.top, 10)
+
+                        Spacer()
+                    }
+                }
+
+                // Error message banner
+                if let msg = detectionErrorMessage {
+                    VStack {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Semantic.warning)
+                            Text(msg)
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.85))
+                        .clipShape(Capsule())
+                        .shadow(radius: 6)
+                        .padding(.top, 14)
+
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
 
                 // Quick Reset Zoom Indicator Badge
                 if scale > 1.05 {
@@ -742,6 +839,96 @@ struct InteractiveSceneImageViewerSheet: View {
             }
     }
 
+    private var detectingRadarView: some View {
+        ZStack {
+            Circle()
+                .stroke(AppTheme.Semantic.warning, lineWidth: 2)
+                .frame(width: 48, height: 48)
+                .scaleEffect(pulse ? 1.35 : 0.85)
+                .opacity(pulse ? 0.25 : 0.85)
+
+            Circle()
+                .strokeBorder(Color.white, lineWidth: 2)
+                .frame(width: 22, height: 22)
+
+            ProgressView()
+                .scaleEffect(0.65)
+                .tint(.white)
+
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 8, weight: .bold))
+                Text("AI đang nhận diện...")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.88))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(AppTheme.Semantic.warning.opacity(0.7), lineWidth: 0.5)
+            }
+            .shadow(radius: 4)
+            .offset(y: -32)
+        }
+    }
+
+    private func handleLongPress(at location: CGPoint, in imageSize: CGSize) {
+        guard !isDetectingObject, imageSize.width > 0, imageSize.height > 0 else { return }
+
+        let clampedX = max(1.0, min(99.0, (location.x / imageSize.width) * 100.0))
+        let clampedY = max(1.0, min(99.0, (location.y / imageSize.height) * 100.0))
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+            detectingPoint = location
+            isDetectingObject = true
+            detectionErrorMessage = nil
+        }
+
+        Task {
+            do {
+                guard let jpeg = image.jpegData(compressionQuality: 0.8) else {
+                    throw AIServiceError.apiError(provider: "Vision", message: "Không thể mã hoá ảnh")
+                }
+
+                let newItem = try await SceneVisionAIService.shared.identifyObjectAtPoint(
+                    imageData: jpeg,
+                    xPercent: clampedX,
+                    yPercent: clampedY
+                )
+
+                await MainActor.run {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        isDetectingObject = false
+                        detectingPoint = nil
+                        currentScene.objectsDetected.append(newItem)
+                        selectedObject = newItem
+                    }
+                    onUpdateScene?(currentScene)
+                }
+            } catch {
+                await MainActor.run {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    withAnimation {
+                        isDetectingObject = false
+                        detectingPoint = nil
+                        detectionErrorMessage = "Không thể nhận diện vật thể tại điểm này. Vui lòng thử lại."
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        withAnimation {
+                            detectionErrorMessage = nil
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private struct PinLayout {
         let targetPoint: CGPoint
         let badgeCenter: CGPoint
@@ -754,7 +941,7 @@ struct InteractiveSceneImageViewerSheet: View {
         index: Int,
         imageSize: CGSize
     ) -> PinLayout {
-        let coords = resolvedCoordinates(for: item, index: index, total: scene.objectsDetected.count)
+        let coords = resolvedCoordinates(for: item, index: index, total: currentScene.objectsDetected.count)
         let targetX = imageSize.width * (coords.x / 100.0)
         let targetY = imageSize.height * (coords.y / 100.0)
         let targetPoint = CGPoint(x: targetX, y: targetY)
@@ -933,7 +1120,7 @@ struct InteractiveSceneImageViewerSheet: View {
     private var objectsCarouselStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(scene.objectsDetected) { item in
+                ForEach(currentScene.objectsDetected) { item in
                     let isSelected = (selectedObject?.id == item.id)
 
                     Button {
