@@ -188,7 +188,7 @@ struct SituationAskScreen: View {
                                         .clipShape(Capsule())
                                         .overlay {
                                             Capsule()
-                                                .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                                         }
                                         .frame(maxWidth: .infinity)
                                         .padding(.horizontal, 16)
@@ -360,7 +360,9 @@ struct SituationAskScreen: View {
             }
             .onDisappear {
                 speechRecognizer.stopRecording()
-                SpeechSynthesizerManager.shared.stop()
+                if practiceConversationDestination == nil {
+                    SpeechSynthesizerManager.shared.stop()
+                }
             }
         }
     }
@@ -411,7 +413,7 @@ struct SituationAskScreen: View {
                             Capsule()
                                 .strokeBorder(
                                     isSelected ? AppTheme.Primary.p500 : AppTheme.Surface.border,
-                                    lineWidth: 1
+                                    lineWidth: 0.5
                                 )
                         }
                     }
@@ -453,7 +455,7 @@ struct SituationAskScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay {
                 RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                    .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
             }
             .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
 
@@ -505,7 +507,7 @@ struct SituationAskScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14)
-                                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                         }
                     }
                     .buttonStyle(.plain)
@@ -538,7 +540,7 @@ struct SituationAskScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(AppTheme.Semantic.error.opacity(0.5), lineWidth: 1)
+                .strokeBorder(AppTheme.Semantic.error.opacity(0.5), lineWidth: 0.5)
         }
     }
 
@@ -577,7 +579,7 @@ struct SituationAskScreen: View {
                             speechRecognizer.isRecording
                             ? AppTheme.Semantic.error
                             : AppTheme.Surface.border,
-                            lineWidth: 1.5
+                            lineWidth: 0.5
                         )
                 }
 
@@ -602,7 +604,7 @@ struct SituationAskScreen: View {
                         .overlay {
                             if !speechRecognizer.isRecording {
                                 Circle()
-                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                             }
                         }
                 }
@@ -990,7 +992,7 @@ private struct SituationAIBubble: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                 }
             }
 
@@ -1040,7 +1042,7 @@ private struct SituationAIBubble: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(AppTheme.Primary.p300, lineWidth: 1.2)
+                            .strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
                     }
                 }
                 .buttonStyle(.plain)
@@ -1081,7 +1083,7 @@ private struct SituationAIBubble: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                             }
                         }
                         .buttonStyle(.plain)
@@ -1095,7 +1097,7 @@ private struct SituationAIBubble: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 12, x: 0, y: 6)
     }
@@ -1200,7 +1202,7 @@ private struct SituationAIBubble: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
     }
 

@@ -278,7 +278,7 @@ struct ChatScreen: View {
                                 .clipShape(Capsule())
                                 .overlay {
                                     Capsule()
-                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .center)
                                 .padding(.top, 4)
@@ -333,6 +333,7 @@ struct ChatScreen: View {
                                     }
                                 }
                             }
+
                         }
                         .onChange(of: highlightedMessageID) { _, _ in
                             if let targetID = targetHighlightedMessageID {
@@ -465,7 +466,9 @@ struct ChatScreen: View {
         .onDisappear {
             suggestionTask?.cancel()
             speechRecognizer.stopRecording()
-            SpeechSynthesizerManager.shared.stop()
+            if !showLiveVoiceMode {
+                SpeechSynthesizerManager.shared.stop()
+            }
         }
     }
 
@@ -495,7 +498,7 @@ struct ChatScreen: View {
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                 }
             }
 
@@ -520,7 +523,49 @@ struct ChatScreen: View {
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                }
+            }
+
+            if conversation.messages.isEmpty {
+                HStack(spacing: 10) {
+                    Button {
+                        startSituationWithAISpeakingFirst()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "speaker.wave.2.fill")
+                            Text("AI mở lời tình huống trước")
+                        }
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.Primary.p500)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoading)
+
+                    Button {
+                        showLiveVoiceMode = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "waveform.and.mic")
+                            Text("Voice AI")
+                        }
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.Accent.a600)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.Accent.a50)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(AppTheme.Accent.a500, lineWidth: 0.5)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoading)
                 }
             }
         }
@@ -529,7 +574,7 @@ struct ChatScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(
             color: AppTheme.Shadow.card,
@@ -580,7 +625,7 @@ struct ChatScreen: View {
                                         item.isAI
                                         ? AppTheme.Primary.p500.opacity(0.35)
                                         : AppTheme.Surface.border,
-                                        lineWidth: 1
+                                        lineWidth: 0.5
                                     )
                             }
                         }
@@ -631,7 +676,7 @@ struct ChatScreen: View {
                             speechRecognizer.isRecording
                             ? AppTheme.Semantic.error
                             : AppTheme.Surface.border,
-                            lineWidth: 1.5
+                            lineWidth: 0.5
                         )
                 }
 
@@ -656,7 +701,7 @@ struct ChatScreen: View {
                         .overlay {
                             if !speechRecognizer.isRecording {
                                 Circle()
-                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                             }
                         }
                 }
@@ -924,6 +969,66 @@ struct ChatScreen: View {
     }
 
     // MARK: - Send Message
+
+    @MainActor
+    private func startSituationWithAISpeakingFirst() {
+        guard !isLoading else { return }
+        if speechRecognizer.isRecording {
+            speechRecognizer.stopRecording()
+        }
+        hideKeyboard()
+        isLoading = true
+
+        let title = conversation.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let desc = conversation.conversationDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveContext = desc.isEmpty
+            ? "Roleplay conversation about \(title.isEmpty ? "daily English communication" : title)."
+            : desc
+
+        Task {
+            do {
+                let aiService = AIService(provider: selectedAIModel.makeProvider())
+                let response = try await aiService.improveEnglish(
+                    userInput: "Please start our roleplay conversation in character by speaking first in English with a natural opening greeting and question that fits the situation: \(effectiveContext)",
+                    context: effectiveContext,
+                    recentHistory: []
+                )
+
+                await MainActor.run {
+                    let openingLine: String = {
+                        let q = response.followUpQuestion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if !q.isEmpty { return q }
+                        let nat = response.natural.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !nat.isEmpty { return nat }
+                        return "Hi! Let's start our conversation. How can I help you today?"
+                    }()
+
+                    if title.isEmpty || title == "Daily Life English" || title == "New Chat",
+                       let suggestedTitle = response.conversationTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !suggestedTitle.isEmpty {
+                        conversation.title = suggestedTitle
+                    }
+
+                    let starterMessage = MessageModel(
+                        text: openingLine,
+                        isUser: false,
+                        followUpQuestion: openingLine,
+                        suggestedReplies: response.suggestedReplies
+                    )
+                    starterMessage.conversation = conversation
+                    context.insert(starterMessage)
+                    try? context.save()
+
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    showStatusMessage("Không thể khởi tạo lời mở đầu AI")
+                }
+            }
+        }
+    }
 
     @MainActor
     private func sendMessage() {

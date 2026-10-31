@@ -1,4 +1,5 @@
 *.png
+!**/*.xcassets/**/*.png
 English Corrector/GeminiConfig.plist
 English Corrector/GroqConfig.plist
 *.xcuserstate

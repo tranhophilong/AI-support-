@@ -257,7 +257,7 @@ struct ListConversationScreen: View {
                             .clipShape(Capsule())
                             .overlay {
                                 Capsule()
-                                    .strokeBorder(AppTheme.Accent.a500.opacity(0.5), lineWidth: 1.2)
+                                    .strokeBorder(AppTheme.Accent.a500.opacity(0.5), lineWidth: 0.5)
                             }
                         }
                     }
@@ -283,7 +283,10 @@ struct ListConversationScreen: View {
                                 NavigationLink(value: conversation) {
 
                                     ConversationCard(
-                                        conversation: conversation
+                                        conversation: conversation,
+                                        onOpenVoiceAI: {
+                                            activeVoiceConversation = conversation
+                                        }
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -516,7 +519,7 @@ struct ListConversationScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay {
                 RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(AppTheme.Primary.p300, lineWidth: 1.3)
+                    .strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
             }
         }
         .buttonStyle(.plain)
@@ -530,14 +533,17 @@ struct ListConversationScreen: View {
         )
         context.insert(conversation)
 
-        let starterMessage = MessageModel(
-            text: scenario.starterQuestion,
-            isUser: false,
-            followUpQuestion: scenario.starterQuestion,
-            suggestedReplies: scenario.starterReplies
-        )
-        starterMessage.conversation = conversation
-        context.insert(starterMessage)
+        let trimmedStarter = scenario.starterQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedStarter.isEmpty {
+            let starterMessage = MessageModel(
+                text: trimmedStarter,
+                isUser: false,
+                followUpQuestion: trimmedStarter,
+                suggestedReplies: scenario.starterReplies
+            )
+            starterMessage.conversation = conversation
+            context.insert(starterMessage)
+        }
 
         try? context.save()
 
@@ -693,61 +699,302 @@ private struct WidgetOnboardingStep: View {
         }
     }
 }
-// MARK: - Conversation Card
+// MARK: - Conversation Card & Topic Style
+
+private struct ConversationTopicTheme {
+    let categoryLabel: String
+    let icon: String
+    let tintColor: Color
+    let badgeBackground: Color
+
+    static func resolve(title: String, description: String) -> ConversationTopicTheme {
+        let combined = "\(title) \(description)".lowercased()
+
+        let workKeywords = [
+            "interview", "job", "work", "office", "meeting", "salary", "manager",
+            "colleague", "business", "project", "standup", "career",
+            "phỏng vấn", "công việc", "sếp", "họp", "lương", "đồng nghiệp", "văn phòng"
+        ]
+        if workKeywords.contains(where: { combined.contains($0) }) {
+            return ConversationTopicTheme(
+                categoryLabel: "CÔNG VIỆC",
+                icon: "briefcase.fill",
+                tintColor: AppTheme.Primary.p500,
+                badgeBackground: AppTheme.Primary.p50
+            )
+        }
+
+        let foodKeywords = [
+            "coffee", "cafe", "restaurant", "order", "food", "drink", "menu",
+            "dinner", "lunch", "breakfast", "waiter", "barista",
+            "nhà hàng", "cà phê", "gọi món", "ăn uống", "ẩm thực"
+        ]
+        if foodKeywords.contains(where: { combined.contains($0) }) {
+            return ConversationTopicTheme(
+                categoryLabel: "ẨM THỰC & CAFE",
+                icon: "cup.and.saucer.fill",
+                tintColor: AppTheme.Accent.a600,
+                badgeBackground: AppTheme.Accent.a50
+            )
+        }
+
+        let travelKeywords = [
+            "airport", "flight", "hotel", "travel", "customs", "immigration",
+            "direction", "check-in", "booking", "room", "taxi", "train",
+            "du lịch", "sân bay", "khách sạn", "hỏi đường", "chuyến bay"
+        ]
+        if travelKeywords.contains(where: { combined.contains($0) }) {
+            return ConversationTopicTheme(
+                categoryLabel: "DU LỊCH",
+                icon: "airplane.departure",
+                tintColor: AppTheme.Semantic.success,
+                badgeBackground: AppTheme.Semantic.success.opacity(0.12)
+            )
+        }
+
+        let serviceKeywords = [
+            "shopping", "store", "buy", "price", "doctor", "hospital", "clinic",
+            "symptom", "bank", "support",
+            "mua sắm", "khám bệnh", "bác sĩ", "cửa hàng"
+        ]
+        if serviceKeywords.contains(where: { combined.contains($0) }) {
+            return ConversationTopicTheme(
+                categoryLabel: "ĐỜI SỐNG",
+                icon: "bag.fill",
+                tintColor: AppTheme.Accent.a600,
+                badgeBackground: AppTheme.Accent.a50
+            )
+        }
+
+        return ConversationTopicTheme(
+            categoryLabel: "GIAO TIẾP HÀNG NGÀY",
+            icon: "bubble.left.and.text.bubble.right.fill",
+            tintColor: AppTheme.Primary.p500,
+            badgeBackground: AppTheme.Primary.p50
+        )
+    }
+}
 
 struct ConversationCard: View {
 
     let conversation: ConversationModel
+    var onOpenVoiceAI: (() -> Void)? = nil
+
+    private var sortedMessages: [MessageModel] {
+        conversation.messages.sorted(by: { $0.createdAt < $1.createdAt })
+    }
+
+    private var latestMessage: MessageModel? {
+        sortedMessages.last
+    }
+
+    private var topicTheme: ConversationTopicTheme {
+        ConversationTopicTheme.resolve(
+            title: conversation.title,
+            description: conversation.conversationDescription
+        )
+    }
+
+    private var displayTitle: String {
+        let trimmed = conversation.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "New Chat" : trimmed
+    }
+
+    private var displaySubtitle: String {
+        conversation.conversationDescription
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
+    private var latestMessagePreview: (senderLabel: String, isUser: Bool, content: String)? {
+        guard let msg = latestMessage else { return nil }
+        if msg.isUser {
+            let cleaned = msg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { return nil }
+            return ("Bạn:", true, cleaned)
+        } else {
+            let natural = msg.natural?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let followUp = msg.followUpQuestion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fixed = msg.fixed?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let raw = msg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let bestLine: String = {
+                if !natural.isEmpty { return natural }
+                if !followUp.isEmpty { return followUp }
+                if !fixed.isEmpty { return fixed }
+                return raw.replacingOccurrences(of: "\n", with: " ")
+            }()
+
+            guard !bestLine.isEmpty else { return nil }
+            return ("AI Coach:", false, bestLine)
+        }
+    }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
 
-        VStack(alignment: .leading, spacing: 10) {
+            // 1. TẦNG HEADER: ICON CHỦ ĐỀ + CATEGORY & NGÀY + TITLE ĐẬM LỚN + NÚT VOICE AI
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13)
+                        .fill(topicTheme.badgeBackground)
+                        .frame(width: 44, height: 44)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 13)
+                                .strokeBorder(topicTheme.tintColor.opacity(0.28), lineWidth: 0.5)
+                        }
 
-            HStack {
-                Image(systemName: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Secondary.s600)
-                    .frame(width: 24, height: 24)
-                    .background(AppTheme.Secondary.s100)
-                    .clipShape(Circle())
+                    Image(systemName: topicTheme.icon)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(topicTheme.tintColor)
+                }
 
-                Text(conversation.title.isEmpty ? "New Chat" : conversation.title)
-                    .font(.headline)
-                    .foregroundStyle(AppTheme.Neutral.n900)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(topicTheme.categoryLabel)
+                            .font(.system(size: 10, weight: .heavy))
+                            .tracking(0.4)
+                            .foregroundStyle(topicTheme.tintColor)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(topicTheme.badgeBackground)
+                            .clipShape(Capsule())
 
-                Spacer()
+                        Text("•")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.Neutral.n400)
 
-                Text(conversation.createdAt, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Neutral.n500)
+                        Text(conversation.createdAt, style: .date)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(AppTheme.Neutral.n500)
+
+                        Spacer(minLength: 4)
+                    }
+
+                    Text(displayTitle)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(AppTheme.Neutral.n900)
+                        .lineLimit(1)
+                }
+
+                if let onOpenVoiceAI {
+                    Button {
+                        onOpenVoiceAI()
+                    } label: {
+                        Image(systemName: "waveform.and.mic")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Primary.p700)
+                            .frame(width: 34, height: 34)
+                            .background(AppTheme.Primary.p50)
+                            .clipShape(Circle())
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Mở Voice AI cho hội thoại này")
+                }
             }
 
-            if !conversation.conversationDescription.isEmpty {
+            // 2. TẦNG SUBTITLE (NGỮ CẢNH AI): ĐÓNG KHUNG NHẸ CÓ NHÃN RÕ RÀNG
+            if !displaySubtitle.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(topicTheme.tintColor.opacity(0.75))
+                        .frame(width: 3)
+                        .padding(.vertical, 2)
 
-                Text(conversation.conversationDescription)
-                    .font(.subheadline)
-                    .foregroundStyle(AppTheme.Neutral.n700)
-                    .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "target")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Ngữ cảnh tình huống")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundStyle(AppTheme.Neutral.n500)
+
+                        Text(displaySubtitle)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Neutral.n700)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(AppTheme.Surface.cardMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 11))
             }
 
-            Text(conversation.messages.sorted(by: { $0.createdAt < $1.createdAt }).last?.text ?? "No messages yet")
-                .font(.footnote)
+            Divider()
+                .overlay(AppTheme.Surface.border.opacity(0.6))
+
+            // 3. TẦNG PREVIEW TIN NHẮN GẦN NHẤT + SỐ LƯỢNG CÂU
+            HStack(alignment: .center, spacing: 8) {
+                if let preview = latestMessagePreview {
+                    HStack(spacing: 4) {
+                        Image(systemName: preview.isUser ? "person.fill" : "sparkles")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(preview.senderLabel)
+                            .font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(preview.isUser ? AppTheme.Primary.p700 : AppTheme.Semantic.success)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        preview.isUser
+                        ? AppTheme.Primary.p50
+                        : AppTheme.Semantic.success.opacity(0.12)
+                    )
+                    .clipShape(Capsule())
+
+                    Text(preview.content)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AppTheme.Neutral.n900.opacity(0.88))
+                        .lineLimit(1)
+                } else {
+                    Image(systemName: "hand.wave.fill")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.Accent.a600)
+
+                    Text("Chưa có tin nhắn • Chạm để bắt đầu hội thoại")
+                        .font(.caption)
+                        .italic()
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 4)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("\(sortedMessages.count)")
+                        .font(.caption2.weight(.bold))
+                }
                 .foregroundStyle(AppTheme.Neutral.n500)
-                .lineLimit(1)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(AppTheme.Surface.cardMuted)
+                .clipShape(Capsule())
+            }
         }
-        .padding()
+        .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppTheme.Surface.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(
             color: AppTheme.Shadow.card,
-            radius: 12,
+            radius: 10,
             x: 0,
-            y: 6
+            y: 5
         )
     }
 }

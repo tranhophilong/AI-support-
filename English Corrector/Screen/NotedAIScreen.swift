@@ -259,7 +259,7 @@ struct NotedAIScreen: View {
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(
                                 isSelected ? AppTheme.Primary.p500 : AppTheme.Surface.border,
-                                lineWidth: 1
+                                lineWidth: 0.5
                             )
                     }
                 }
@@ -275,90 +275,42 @@ struct NotedAIScreen: View {
 
     private var savedNotesContentView: some View {
         VStack(spacing: 0) {
-            // Notification Setting Header
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Daily Review", systemImage: "bell.fill")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Neutral.n900)
-
-                        Text("Get a random note delivered daily")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Neutral.n500)
-                    }
-
-                    Spacer()
-
-                    Toggle("", isOn: $isNotificationEnabled)
-                        .labelsHidden()
-                        .onChange(of: isNotificationEnabled) { _, newValue in
-                            if newValue {
-                                updateNotification()
-                            } else {
-                                NotificationManager.shared.cancelDailyNotification()
-                            }
-                        }
-                }
-
-                if isNotificationEnabled {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Quick Presets")
-                            .font(.caption2.bold())
-                            .foregroundStyle(AppTheme.Neutral.n400)
-                            .textCase(.uppercase)
-
-                        HStack(spacing: 12) {
-                            presetButton(label: "12 AM", hour: 0, minute: 0)
-                            presetButton(label: "12 PM", hour: 12, minute: 0)
-                            presetButton(label: "8 PM", hour: 20, minute: 0)
-
-                            Button {
-                                showTimePicker = true
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "clock")
-                                    Text("Custom")
-                                }
-                                .font(.subheadline.bold())
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(AppTheme.Surface.cardMuted)
-                                .foregroundStyle(AppTheme.Neutral.n700)
-                                .clipShape(Capsule())
-                            }
-                        }
-
-                        HStack {
-                            Text("Scheduled for:")
-                                .font(.subheadline)
-                                .foregroundStyle(AppTheme.Neutral.n500)
-
-                            Text(formatTime(hour: notificationHour, minute: notificationMinute))
-                                .font(.subheadline.bold())
-                                .foregroundStyle(AppTheme.Primary.p500)
-                        }
-                        .padding(.top, 4)
-                    }
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .padding()
-            .background(AppTheme.Primary.p50)
-            .animation(.spring(), value: isNotificationEnabled)
+            // Notification Setting Header Card
+            dailyReviewHeaderCard
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
 
             List {
                 if notes.isEmpty {
                     ContentUnavailableView(
-                        "No saved notes",
+                        "Chưa có ghi chú nào",
                         systemImage: "note.text",
-                        description: Text("Save interesting AI explanations to see them here.")
+                        description: Text("Lưu lại các câu sửa lỗi hoặc giải thích thú vị từ AI để ôn tập tại đây.")
                     )
                     .foregroundStyle(AppTheme.Neutral.n500)
-                    .listRowBackground(AppTheme.Surface.appBackground)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 } else {
                     ForEach(notes) { note in
-                        savedNoteRow(note)
+                        savedNoteCard(note)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    deleteNote(note)
+                                } label: {
+                                    Label("Xoá", systemImage: "trash")
+                                }
+
+                                Button {
+                                    saveNoteToWidget(note)
+                                } label: {
+                                    Label("Widget", systemImage: "square.grid.2x2")
+                                }
+                                .tint(AppTheme.Primary.p500)
+                            }
                     }
                 }
             }
@@ -368,48 +320,230 @@ struct NotedAIScreen: View {
         }
     }
 
-    @ViewBuilder
-    private func savedNoteRow(_ note: SavedNoteModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if note.isExplanation {
-                explanationText(note.text, highlight: note.explanationNoted)
-                    .font(.body)
-                    .foregroundStyle(AppTheme.Neutral.n900)
-            } else {
-                diffText(original: note.originalText ?? "", revised: note.text)
-                    .font(.body)
-                    .foregroundStyle(AppTheme.Neutral.n900)
-            }
+    // MARK: - Daily Review Header Card
 
-            if !note.originalContext.isEmpty && note.isExplanation {
-                HStack(spacing: 8) {
-                    Text(note.originalContext)
-                        .font(.caption)
-                        .italic()
-                        .foregroundStyle(AppTheme.Neutral.n500)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    SpeakButton(
-                        text: note.originalContext,
-                        font: .caption,
-                        activeColor: AppTheme.Primary.p500
-                    )
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(AppTheme.Surface.cardMuted)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-
+    private var dailyReviewHeaderCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Text(note.isExplanation ? "Explanation" : "Sentence")
-                    .font(.caption2.bold())
-                    .foregroundStyle(note.isExplanation ? AppTheme.Accent.a600 : AppTheme.Secondary.s600)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(note.isExplanation ? AppTheme.Accent.a100 : AppTheme.Secondary.s100)
-                    .clipShape(Capsule())
+                ZStack {
+                    Circle()
+                        .fill(isNotificationEnabled ? AppTheme.Primary.p500 : AppTheme.Surface.cardMuted)
+                        .frame(width: 40, height: 40)
 
+                    Image(systemName: isNotificationEnabled ? "bell.badge.fill" : "bell.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(isNotificationEnabled ? .white : AppTheme.Neutral.n500)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Daily Review")
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Neutral.n900)
+
+                    Text("Nhắc nhở ôn lại 1 ghi chú mỗi ngày")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: $isNotificationEnabled)
+                    .labelsHidden()
+                    .onChange(of: isNotificationEnabled) { _, newValue in
+                        if newValue {
+                            updateNotification()
+                        } else {
+                            NotificationManager.shared.cancelDailyNotification()
+                        }
+                    }
+            }
+
+            if isNotificationEnabled {
+                VStack(alignment: .leading, spacing: 10) {
+                    Divider()
+                        .overlay(AppTheme.Surface.border)
+
+                    HStack {
+                        Text("Lịch nhắc hằng ngày:")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(AppTheme.Neutral.n500)
+
+                        Spacer()
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 10))
+                            Text(formatTime(hour: notificationHour, minute: notificationMinute))
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(AppTheme.Primary.p500)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.Primary.p50)
+                        .clipShape(Capsule())
+                        .overlay {
+                            Capsule().strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        presetButton(label: "12 AM", hour: 0, minute: 0)
+                        presetButton(label: "12 PM", hour: 12, minute: 0)
+                        presetButton(label: "8 PM", hour: 20, minute: 0)
+
+                        Button {
+                            showTimePicker = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 10))
+                                Text("Tùy chọn")
+                            }
+                            .font(.caption.bold())
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(AppTheme.Surface.cardMuted)
+                            .foregroundStyle(AppTheme.Neutral.n700)
+                            .clipShape(Capsule())
+                            .overlay {
+                                Capsule().strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(14)
+        .background(AppTheme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(isNotificationEnabled ? AppTheme.Primary.p300 : AppTheme.Surface.border, lineWidth: 0.5)
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isNotificationEnabled)
+    }
+
+    // MARK: - Saved Note Card
+
+    private func savedNoteCard(_ note: SavedNoteModel) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // MARK: 1. Header (Type Badge, Reminder indicator, Date)
+            HStack(spacing: 8) {
+                // Type Badge: Sentence vs Explanation
+                HStack(spacing: 4) {
+                    Image(systemName: note.isExplanation ? "lightbulb.fill" : "text.badge.checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(note.isExplanation ? "Giải thích AI" : "Câu sửa lỗi")
+                        .font(.caption2.bold())
+                }
+                .foregroundStyle(note.isExplanation ? AppTheme.Accent.a600 : AppTheme.Secondary.s600)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(note.isExplanation ? AppTheme.Accent.a100 : AppTheme.Secondary.s100)
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(
+                            note.isExplanation ? AppTheme.Accent.a500.opacity(0.3) : AppTheme.Secondary.s500.opacity(0.3),
+                            lineWidth: 0.5
+                        )
+                }
+
+                // Reminder status badge if set
+                if let h = note.notificationHour, let m = note.notificationMinute {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.badge.fill")
+                            .font(.system(size: 9))
+                        Text(formatTime(hour: h, minute: m))
+                            .font(.caption2.bold())
+                    }
+                    .foregroundStyle(AppTheme.Semantic.warning)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(AppTheme.Semantic.warning.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(AppTheme.Semantic.warning.opacity(0.3), lineWidth: 0.5)
+                    }
+                }
+
+                Spacer()
+
+                // Creation Date
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 10))
+                    Text(note.createdAt, style: .date)
+                        .font(.caption2)
+                }
+                .foregroundStyle(AppTheme.Neutral.n400)
+            }
+
+            // MARK: 2. Body (Revised text/explanation + quotation block for original context)
+            VStack(alignment: .leading, spacing: 10) {
+                if note.isExplanation {
+                    explanationText(note.text, highlight: note.explanationNoted)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.Neutral.n900)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    diffText(original: note.originalText ?? "", revised: note.text)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.Neutral.n900)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Original Context / Input in a nice quote block
+                let hasContext = !note.originalContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let hasOriginalText = !(note.originalText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+                if hasContext || (hasOriginalText && !note.isExplanation) {
+                    let displayQuote = note.isExplanation ? note.originalContext : (note.originalText ?? note.originalContext)
+                    let quoteLabel = note.isExplanation ? "Ngữ cảnh / Câu hỏi gốc:" : "Câu gốc của bạn:"
+
+                    if !displayQuote.isEmpty {
+                        HStack(alignment: .top, spacing: 8) {
+                            RoundedRectangle(cornerRadius: 1.5)
+                                .fill(AppTheme.Primary.p500)
+                                .frame(width: 3)
+                                .padding(.vertical, 2)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(quoteLabel)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(AppTheme.Neutral.n500)
+                                    .textCase(.uppercase)
+
+                                Text(displayQuote)
+                                    .font(.caption)
+                                    .italic(note.isExplanation)
+                                    .foregroundStyle(AppTheme.Neutral.n700)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            SpeakButton(
+                                text: displayQuote,
+                                font: .caption,
+                                activeColor: AppTheme.Primary.p500
+                            )
+                        }
+                        .padding(9)
+                        .background(AppTheme.Surface.cardMuted)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                        }
+                    }
+                }
+            }
+
+            // MARK: 3. Footer (Action toolbar)
+            HStack(spacing: 8) {
+                // Speak Main Note
                 SpeakButton(
                     text: note.text,
                     font: .caption.weight(.semibold),
@@ -417,100 +551,108 @@ struct NotedAIScreen: View {
                     showBackground: true
                 )
 
+                // Save to Widget quick button
+                Button {
+                    saveNoteToWidget(note)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 11))
+                        Text("Widget")
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(AppTheme.Neutral.n700)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(AppTheme.Surface.cardMuted)
+                    .clipShape(Capsule())
+                    .overlay {
+                        Capsule().strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                // Bell Reminder Menu
                 Menu {
-                    if hasMatchingConversation(for: note) {
-                        Button {
-                            openConversation(for: note)
-                        } label: {
-                            Label("Open Saved Conversation", systemImage: "bubble.left.and.bubble.right")
-                        }
-
-                        Divider()
-                    }
-
-                    Button {
-                        saveNoteToWidget(note)
-                    } label: {
-                        Label("Save to Widget", systemImage: "square.grid.2x2")
-                    }
-
-                    Divider()
-
                     Button("12:00 AM") { setNoteTime(note: note, hour: 0, minute: 0) }
+                    Button("08:00 AM") { setNoteTime(note: note, hour: 8, minute: 0) }
+                    Button("12:00 PM") { setNoteTime(note: note, hour: 12, minute: 0) }
                     Button("08:00 PM") { setNoteTime(note: note, hour: 20, minute: 0) }
-                    Button("Custom Time...") {
+                    Button("Giờ khác...") {
                         selectedNoteForTime = note
                         showNoteTimePicker = true
                     }
                     if note.notificationHour != nil {
                         Divider()
-                        Button("Remove Reminder", role: .destructive) {
+                        Button("Xoá nhắc nhở", role: .destructive) {
                             removeNoteNotification(note: note)
                         }
                     }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: note.notificationHour != nil ? "bell.badge.fill" : "bell")
-                        if let h = note.notificationHour, let m = note.notificationMinute {
-                            Text(formatTime(hour: h, minute: m))
-                                .font(.caption2.bold())
-                        }
+                            .font(.system(size: 11))
+                        Text(note.notificationHour != nil ? "Đã hẹn" : "Hẹn giờ")
+                            .font(.caption2.weight(.medium))
                     }
-                    .font(.caption2)
-                    .foregroundStyle(note.notificationHour != nil ? AppTheme.Semantic.warning : AppTheme.Neutral.n500)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .foregroundStyle(note.notificationHour != nil ? AppTheme.Semantic.warning : AppTheme.Neutral.n700)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
                     .background(note.notificationHour != nil ? AppTheme.Semantic.warning.opacity(0.12) : AppTheme.Surface.cardMuted)
                     .clipShape(Capsule())
+                    .overlay {
+                        Capsule().strokeBorder(
+                            note.notificationHour != nil ? AppTheme.Semantic.warning.opacity(0.3) : AppTheme.Surface.border,
+                            lineWidth: 0.5
+                        )
+                    }
                 }
 
+                Spacer()
+
+                // Link to Conversation if available
                 if hasMatchingConversation(for: note) {
                     Button {
                         openConversation(for: note)
                     } label: {
                         HStack(spacing: 3) {
-                            Image(systemName: "arrow.turn.up.right")
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .font(.system(size: 10))
                             Text("Hội thoại")
                                 .font(.caption2.bold())
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
                         }
-                        .font(.caption2)
                         .foregroundStyle(AppTheme.Primary.p500)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
                         .background(AppTheme.Primary.p50)
                         .clipShape(Capsule())
+                        .overlay {
+                            Capsule().strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
+                        }
                     }
                     .buttonStyle(.plain)
                 }
-
-                Spacer()
-
-                Text(note.createdAt, style: .date)
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.Neutral.n400)
             }
+            .padding(.top, 2)
         }
-        .padding(.vertical, 8)
-        .listRowBackground(AppTheme.Surface.card)
-        .swipeActions {
-            Button {
-                saveNoteToWidget(note)
-            } label: {
-                Label("Widget", systemImage: "square.grid.2x2")
-            }
-            .tint(AppTheme.Primary.p500)
+        .padding(14)
+        .background(AppTheme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+        }
+    }
 
-            Button(role: .destructive) {
-                context.delete(note)
-                do {
-                    try context.save()
-                    WidgetNoteStore.remove(id: note.id)
-                } catch {
-                    print("DEBUG: Failed to delete note: \(error)")
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
+    private func deleteNote(_ note: SavedNoteModel) {
+        context.delete(note)
+        do {
+            try context.save()
+            WidgetNoteStore.remove(id: note.id)
+        } catch {
+            print("DEBUG: Failed to delete note: \(error)")
         }
     }
 
@@ -536,7 +678,7 @@ struct NotedAIScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .overlay {
                             RoundedRectangle(cornerRadius: 16)
-                                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                         }
                     } else if let error = analysisErrorMessage {
                         VStack(alignment: .leading, spacing: 10) {
@@ -729,7 +871,7 @@ struct NotedAIScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Accent.a500.opacity(0.45), lineWidth: 1.2)
+                .strokeBorder(AppTheme.Accent.a500.opacity(0.45), lineWidth: 0.5)
         }
     }
 
@@ -795,7 +937,7 @@ struct NotedAIScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
     }
 
@@ -1120,13 +1262,18 @@ struct NotedAIScreen: View {
             setPresetTime(hour: hour, minute: minute)
         } label: {
             Text(label)
-                .font(.subheadline.bold())
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .font(.caption.bold())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
                 .background(isSelected ? AppTheme.Primary.p500 : AppTheme.Surface.cardMuted)
                 .foregroundStyle(isSelected ? .white : AppTheme.Neutral.n700)
                 .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(isSelected ? Color.clear : AppTheme.Surface.border, lineWidth: 0.5)
+                }
         }
+        .buttonStyle(.plain)
     }
 
     private func improvementPresetButton(label: String, hour: Int, minute: Int) -> some View {
@@ -1138,13 +1285,18 @@ struct NotedAIScreen: View {
             showWidgetMessage("Đã hẹn nhắc nhở lúc \(formatTime(hour: hour, minute: minute))")
         } label: {
             Text(label)
-                .font(.subheadline.bold())
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .font(.caption.bold())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
                 .background(isSelected ? AppTheme.Accent.a600 : AppTheme.Surface.card)
                 .foregroundStyle(isSelected ? .white : AppTheme.Neutral.n700)
                 .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(isSelected ? Color.clear : AppTheme.Surface.border, lineWidth: 0.5)
+                }
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: - AI Mistake Summary Actions
@@ -1448,7 +1600,7 @@ private struct MistakeOverallSummaryCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
     }
 }
@@ -1596,7 +1748,7 @@ private struct MistakeCategoryCardView: View {
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(
                     isHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                    lineWidth: isHighlighted ? 2.2 : 1.2
+                    lineWidth: isHighlighted ? 1.5 : 0.5
                 )
         }
         .shadow(
@@ -1679,6 +1831,10 @@ private struct MistakeExampleRowView: View {
         .padding(10)
         .background(AppTheme.Surface.cardMuted)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+        }
     }
 }
 

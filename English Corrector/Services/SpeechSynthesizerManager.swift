@@ -15,6 +15,7 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
     @Published private(set) var isSpeakingSlow: Bool = false
 
     private let synthesizer = AVSpeechSynthesizer()
+    private var currentUtterance: AVSpeechUtterance?
     private var onFinishCallback: (@MainActor () -> Void)?
 
     override init() {
@@ -40,26 +41,29 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
             return
         }
 
+        speak(cleaned, slow: slow)
+    }
+
+    func speak(_ text: String, slow: Bool = false) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
+        onFinishCallback = nil
+        currentUtterance = nil
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            print("DEBUG: Failed to configure AVAudioSession for TTS: \(error)")
-        }
+        configureAudioSessionForPlayback()
 
         let utterance = AVSpeechUtterance(string: cleaned)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = slow ? 0.36 : AVSpeechUtteranceDefaultSpeechRate
         utterance.pitchMultiplier = 1.0
 
+        currentUtterance = utterance
         speakingText = cleaned
         isSpeakingSlow = slow
-        onFinishCallback = nil
         synthesizer.speak(utterance)
     }
 
@@ -74,18 +78,13 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
             return
         }
 
+        onFinishCallback = nil
+        currentUtterance = nil
         if synthesizer.isSpeaking {
-            onFinishCallback = nil
             synthesizer.stopSpeaking(at: .immediate)
         }
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            print("DEBUG: Failed to configure AVAudioSession for TTS: \(error)")
-        }
+        configureAudioSessionForPlayback()
 
         let utterance = AVSpeechUtterance(string: cleaned)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
@@ -94,14 +93,26 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
         utterance.rate = clampedRate
         utterance.pitchMultiplier = 1.0
 
+        currentUtterance = utterance
         speakingText = cleaned
         isSpeakingSlow = rateMultiplier < 0.9
         onFinishCallback = onFinish
         synthesizer.speak(utterance)
     }
 
+    private func configureAudioSessionForPlayback() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("DEBUG: Failed to configure AVAudioSession for TTS: \(error)")
+        }
+    }
+
     func stop() {
         onFinishCallback = nil
+        currentUtterance = nil
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -111,23 +122,23 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            if self.speakingText == utterance.speechString {
-                self.speakingText = nil
-                self.isSpeakingSlow = false
-                let callback = self.onFinishCallback
-                self.onFinishCallback = nil
-                callback?()
-            }
+            guard utterance === self.currentUtterance else { return }
+            self.currentUtterance = nil
+            self.speakingText = nil
+            self.isSpeakingSlow = false
+            let callback = self.onFinishCallback
+            self.onFinishCallback = nil
+            callback?()
         }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            if self.speakingText == utterance.speechString {
-                self.speakingText = nil
-                self.isSpeakingSlow = false
-                self.onFinishCallback = nil
-            }
+            guard utterance === self.currentUtterance else { return }
+            self.currentUtterance = nil
+            self.speakingText = nil
+            self.isSpeakingSlow = false
+            self.onFinishCallback = nil
         }
     }
 }

@@ -936,11 +936,97 @@ struct LiveVoiceConversationScreen: View {
     // MARK: - Voice Interaction Logic
 
     private func startInitialGreetingIfNeeded() {
+        if conversation.messages.isEmpty {
+            generateInitialSituationGreetingAndSpeak()
+            return
+        }
+
         if subtitleMode == .bilingual {
             fetchTranslationForCurrentAITurn(currentAISpokenLine)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             speakCurrentAITurn(autoListenAfter: isHandsFreeMode)
+        }
+    }
+
+    @MainActor
+    private func generateInitialSituationGreetingAndSpeak() {
+        guard !isSendingToAI else { return }
+        if speechRecognizer.isRecording {
+            speechRecognizer.stopRecording()
+        }
+        tts.stop()
+        isSendingToAI = true
+
+        let title = conversation.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let situationDesc = conversation.conversationDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveContext = situationDesc.isEmpty
+            ? "Roleplay conversation about \(title.isEmpty ? "daily English communication" : title)."
+            : situationDesc
+        let provider = selectedAIModel.makeProvider()
+
+        Task {
+            do {
+                let aiService = AIService(provider: provider)
+                let response = try await aiService.improveEnglish(
+                    userInput: "Please start our roleplay conversation in character by speaking first in English with a natural opening greeting and question that fits the situation: \(effectiveContext)",
+                    context: effectiveContext,
+                    recentHistory: []
+                )
+
+                await MainActor.run {
+                    let openingLine: String = {
+                        let q = response.followUpQuestion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if !q.isEmpty { return q }
+                        let nat = response.natural.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !nat.isEmpty { return nat }
+                        return "Hi! Let's start our conversation. How can I help you today?"
+                    }()
+
+                    if title.isEmpty || title == "Daily Life English" || title == "New Chat" || title == "Tình huống tuỳ chỉnh",
+                       let suggestedTitle = response.conversationTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !suggestedTitle.isEmpty {
+                        conversation.title = suggestedTitle
+                    }
+
+                    let starterMessage = MessageModel(
+                        text: openingLine,
+                        isUser: false,
+                        followUpQuestion: openingLine,
+                        suggestedReplies: response.suggestedReplies
+                    )
+                    starterMessage.conversation = conversation
+                    context.insert(starterMessage)
+                    try? context.save()
+
+                    isSendingToAI = false
+                    if subtitleMode == .bilingual {
+                        fetchTranslationForCurrentAITurn(openingLine)
+                    }
+                    speakCurrentAITurn(autoListenAfter: isHandsFreeMode)
+                }
+            } catch {
+                await MainActor.run {
+                    let fallbackLine = title.isEmpty
+                        ? "Hi there! Let's start our roleplay conversation. How can I help you today?"
+                        : "Hi! Let's start our roleplay about \(title). How can I help you today?"
+                    let starterMessage = MessageModel(
+                        text: fallbackLine,
+                        isUser: false,
+                        followUpQuestion: fallbackLine,
+                        suggestedReplies: [
+                            "Hi! Thank you for speaking with me today.",
+                            "Could you tell me more about this situation?"
+                        ]
+                    )
+                    starterMessage.conversation = conversation
+                    context.insert(starterMessage)
+                    try? context.save()
+
+                    isSendingToAI = false
+                    speakCurrentAITurn(autoListenAfter: isHandsFreeMode)
+                }
+            }
         }
     }
 
@@ -1537,25 +1623,26 @@ struct VoiceRoleplayPickerSheet: View {
                                 .textFieldStyle(.roundedBorder)
 
                             Button {
-                                let title = customTopicTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let rawTitle = customTopicTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                                 let desc = customTopicSituation.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !title.isEmpty else { return }
+                                guard !rawTitle.isEmpty || !desc.isEmpty else { return }
+                                let effectiveTitle = rawTitle.isEmpty ? "Tình huống tuỳ chỉnh" : rawTitle
+                                let effectiveDesc = desc.isEmpty
+                                    ? "Roleplay conversation about \(effectiveTitle). Start in character and help the user practice speaking naturally."
+                                    : desc
                                 let customScenario = VoiceRoleplayScenario(
                                     id: UUID().uuidString,
-                                    title: title,
+                                    title: effectiveTitle,
                                     vietnameseSubtitle: desc.isEmpty ? "Tình huống tuỳ chỉnh" : desc,
                                     icon: "sparkles",
                                     badgeText: "Tuỳ chỉnh",
-                                    contextDescription: desc.isEmpty ? "Roleplay conversation about \(title). Help the user practice speaking naturally." : desc,
-                                    starterQuestion: "Hi! Let's start our roleplay about \(title). How would you like to begin?",
-                                    starterReplies: [
-                                        "Hi! Thank you for meeting with me today.",
-                                        "Could you tell me more about the situation first?"
-                                    ]
+                                    contextDescription: effectiveDesc,
+                                    starterQuestion: "",
+                                    starterReplies: []
                                 )
                                 onSelectScenario(customScenario)
                             } label: {
-                                Label("Bắt đầu tình huống này", systemImage: "mic.fill")
+                                Label("Bắt đầu tình huống này (AI nói trước)", systemImage: "speaker.wave.2.fill")
                                     .font(.subheadline.bold())
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
@@ -1563,7 +1650,10 @@ struct VoiceRoleplayPickerSheet: View {
                                     .foregroundStyle(.white)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
-                            .disabled(customTopicTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(
+                                customTopicTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                                customTopicSituation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            )
                         }
                         .padding(14)
                         .background(AppTheme.Surface.card)

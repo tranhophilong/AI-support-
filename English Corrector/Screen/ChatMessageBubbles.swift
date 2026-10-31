@@ -43,7 +43,7 @@ struct UserBubble: View {
                     .clipShape(Capsule())
                     .overlay {
                         Capsule()
-                            .strokeBorder(AppTheme.Accent.a500, lineWidth: 1)
+                            .strokeBorder(AppTheme.Accent.a500, lineWidth: 0.5)
                     }
                 }
 
@@ -90,7 +90,7 @@ struct UserBubble: View {
                     RoundedRectangle(cornerRadius: 18)
                         .strokeBorder(
                             isHighlightedMessage ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                            lineWidth: isHighlightedMessage ? 2.5 : 1.5
+                            lineWidth: isHighlightedMessage ? 1.5 : 0.5
                         )
                 }
                 .shadow(
@@ -174,7 +174,7 @@ struct AIBubble: View {
                 .clipShape(Capsule())
                 .overlay {
                     Capsule()
-                        .strokeBorder(AppTheme.Accent.a500, lineWidth: 1)
+                        .strokeBorder(AppTheme.Accent.a500, lineWidth: 0.5)
                 }
             }
 
@@ -249,7 +249,7 @@ struct AIBubble: View {
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(
                                 fixedHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                                lineWidth: fixedHighlighted ? 2.0 : 1.2
+                                lineWidth: fixedHighlighted ? 1.5 : 0.5
                             )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -330,7 +330,7 @@ struct AIBubble: View {
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(
                                 naturalHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                                lineWidth: naturalHighlighted ? 2.0 : 1.2
+                                lineWidth: naturalHighlighted ? 1.5 : 0.5
                             )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -410,7 +410,7 @@ struct AIBubble: View {
                         .overlay {
                             if expHighlighted {
                                 RoundedRectangle(cornerRadius: 10)
-                                    .strokeBorder(AppTheme.Accent.a500, lineWidth: 1.5)
+                                    .strokeBorder(AppTheme.Accent.a500, lineWidth: 0.5)
                             }
                         }
                     }
@@ -503,7 +503,7 @@ struct AIBubble: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .strokeBorder(
                                     questionHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                                    lineWidth: questionHighlighted ? 2.0 : 1.2
+                                    lineWidth: questionHighlighted ? 1.5 : 0.5
                                 )
                         }
                     }
@@ -568,7 +568,7 @@ struct AIBubble: View {
                                         RoundedRectangle(cornerRadius: 12)
                                             .strokeBorder(
                                                 replyHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                                                lineWidth: replyHighlighted ? 2.0 : 1
+                                                lineWidth: replyHighlighted ? 1.5 : 0.5
                                             )
                                     }
                                     .messageActions(
@@ -602,7 +602,7 @@ struct AIBubble: View {
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(
                     isHighlightedMessage ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                    lineWidth: isHighlightedMessage ? 2.5 : 1.5
+                    lineWidth: isHighlightedMessage ? 1.5 : 0.5
                 )
         }
         .shadow(
@@ -679,7 +679,7 @@ struct AIBubble: View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(
                         isAltHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                        lineWidth: isAltHighlighted ? 2.0 : 1.0
+                        lineWidth: isAltHighlighted ? 1.5 : 0.5
                     )
             }
             .messageActions(
@@ -812,7 +812,7 @@ struct StarterAIBubble: View {
                     .clipShape(Capsule())
                     .overlay {
                         Capsule()
-                            .strokeBorder(AppTheme.Accent.a500, lineWidth: 1)
+                            .strokeBorder(AppTheme.Accent.a500, lineWidth: 0.5)
                     }
                 }
 
@@ -877,7 +877,7 @@ struct StarterAIBubble: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                 }
 
                 if !validReplies.isEmpty {
@@ -937,7 +937,7 @@ struct StarterAIBubble: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                                 }
                                 .messageActions(
                                     speakText: reply,
@@ -966,7 +966,7 @@ struct StarterAIBubble: View {
                 RoundedRectangle(cornerRadius: 18)
                     .strokeBorder(
                         isHighlightedMessage ? AppTheme.Accent.a500 : AppTheme.Surface.border,
-                        lineWidth: isHighlightedMessage ? 2.5 : 1.5
+                        lineWidth: isHighlightedMessage ? 1.5 : 0.5
                     )
             }
             .shadow(

@@ -338,7 +338,7 @@ struct SentenceStructureScreen: View {
                 RoundedRectangle(cornerRadius: 14)
                     .strokeBorder(
                         speechRecognizer.isRecording ? AppTheme.Semantic.error : AppTheme.Surface.border,
-                        lineWidth: 1.2
+                        lineWidth: 0.5
                     )
             }
 
@@ -360,7 +360,7 @@ struct SentenceStructureScreen: View {
                     .overlay {
                         if !speechRecognizer.isRecording {
                             Capsule()
-                                .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                         }
                     }
                 }
@@ -395,7 +395,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
     }
@@ -416,7 +416,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
     }
 
@@ -449,7 +449,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Semantic.error.opacity(0.5), lineWidth: 1.5)
+                .strokeBorder(AppTheme.Semantic.error.opacity(0.5), lineWidth: 0.5)
         }
     }
 
@@ -499,7 +499,7 @@ struct SentenceStructureScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                            .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                     }
                 }
                 .buttonStyle(.plain)
@@ -681,7 +681,7 @@ struct SentenceStructureScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(AppTheme.Primary.p300, lineWidth: 1)
+                    .strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
             }
 
             // Tense & Sentence Type Badges
@@ -716,7 +716,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
     }
@@ -785,7 +785,7 @@ struct SentenceStructureScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay {
                             RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(style.foreground.opacity(isSelected ? 1 : 0.45), lineWidth: isSelected ? 2 : 1)
+                                .strokeBorder(style.foreground.opacity(isSelected ? 1 : 0.45), lineWidth: isSelected ? 1.5 : 0.5)
                         }
                     }
                     .buttonStyle(.plain)
@@ -851,7 +851,7 @@ struct SentenceStructureScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay {
                         RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(style.foreground.opacity(0.35), lineWidth: 1.2)
+                            .strokeBorder(style.foreground.opacity(0.35), lineWidth: 0.5)
                     }
                 }
             }
@@ -861,7 +861,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
     }
@@ -938,7 +938,7 @@ struct SentenceStructureScreen: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                 }
             }
         }
@@ -947,7 +947,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
     }
@@ -972,7 +972,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
     }
@@ -1098,7 +1098,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
     }
 
@@ -1167,7 +1167,7 @@ struct SentenceStructureScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay {
                             RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(AppTheme.Primary.p300, lineWidth: 1)
+                                .strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
                         }
                     }
                 }
@@ -1211,7 +1211,7 @@ struct SentenceStructureScreen: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 10)
-                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                                    .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                             }
                         }
                         .buttonStyle(.plain)
@@ -1232,7 +1232,7 @@ struct SentenceStructureScreen: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                 }
 
                 Button {
@@ -1258,7 +1258,7 @@ struct SentenceStructureScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Surface.border, lineWidth: 1.5)
+                .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
         .shadow(color: AppTheme.Shadow.card, radius: 10, x: 0, y: 4)
     }

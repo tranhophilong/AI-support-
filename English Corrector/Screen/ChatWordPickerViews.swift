@@ -167,7 +167,7 @@ struct WordPickerText: View {
                                     Capsule()
                                         .stroke(
                                             (isSelected || isSaved) ? activeBackground : foregroundStyle.opacity(0.18),
-                                            lineWidth: 1
+                                            lineWidth: 0.5
                                         )
                                 }
                                 .clipShape(Capsule())
@@ -248,7 +248,7 @@ struct WordPickerText: View {
         .background(modeBackground)
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .stroke(AppTheme.Accent.a100, lineWidth: 1)
+                .stroke(AppTheme.Accent.a100, lineWidth: 0.5)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
