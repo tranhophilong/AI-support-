@@ -229,27 +229,44 @@ final class EnglishNewsService {
     }
 
     private func fallbackParagraphs(for article: NewsArticleItem) -> [String] {
-        var result: [String] = []
         if !article.description.isEmpty {
-            result.append(article.description)
+            return [article.description]
         }
-        result.append(
-            "Full article is available at \(article.source). Tap the original source link below to open the complete story in your web browser."
-        )
-        return result
+        return []
     }
 
     private func extractCleanParagraphs(from html: String) -> [String] {
+        var contentHTML = html
+
+        // 1. Narrow scope to the main article container
+        let containerPatterns = [
+            "<article[^>]*>(.*?)</article>",
+            "<(div|main)[^>]*(class=\"[^\"]*(entry-content|article__body|story-body|article-body|post-content)[^\"]*\"|id=\"(main-content|maincontent)\")[^>]*>(.*?)</\\1>"
+        ]
+
+        for pat in containerPatterns {
+            if let regex = try? NSRegularExpression(pattern: pat, options: [.dotMatchesLineSeparators, .caseInsensitive]),
+               let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: (html as NSString).length)),
+               match.numberOfRanges > 1 {
+                let range = match.range(at: 1)
+                let candidate = (html as NSString).substring(with: range)
+                if candidate.contains("<p") {
+                    contentHTML = candidate
+                    break
+                }
+            }
+        }
+
         var paragraphs: [String] = []
 
-        // Match standard <p>...</p> tags
+        // 2. Match standard <p>...</p> tags
         let pattern = "<p[^>]*>(.*?)</p>"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else {
             return []
         }
 
-        let nsString = html as NSString
-        let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length))
+        let nsString = contentHTML as NSString
+        let matches = regex.matches(in: contentHTML, options: [], range: NSRange(location: 0, length: nsString.length))
 
         for match in matches {
             guard match.numberOfRanges > 1 else { continue }
@@ -260,8 +277,7 @@ final class EnglishNewsService {
             let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
 
             // Filter out junk, disclaimers, cookie notices, and very short lines
-            if trimmed.count >= 35 &&
-               !isDisallowedContent(trimmed) {
+            if trimmed.count >= 35 && !isDisallowedContent(trimmed) {
                 paragraphs.append(trimmed)
             }
         }
@@ -283,6 +299,7 @@ final class EnglishNewsService {
             "&amp;": "&",
             "&quot;": "\"",
             "&#39;": "'",
+            "&#x27;": "'",
             "&rsquo;": "'",
             "&lsquo;": "'",
             "&rdquo;": "\"",
@@ -302,6 +319,18 @@ final class EnglishNewsService {
             cleaned = cleaned.replacingOccurrences(of: entity, with: replacement)
         }
 
+        // Decode any other decimal numeric entities &#NNN;
+        if let regex = try? NSRegularExpression(pattern: "&#(\\d+);") {
+            let ns = cleaned as NSString
+            let matches = regex.matches(in: cleaned, options: [], range: NSRange(location: 0, length: ns.length))
+            for match in matches.reversed() {
+                if let code = Int(ns.substring(with: match.range(at: 1))),
+                   let scalar = UnicodeScalar(code) {
+                    cleaned = (cleaned as NSString).replacingCharacters(in: match.range, with: String(Character(scalar)))
+                }
+            }
+        }
+
         // Clean extra whitespace
         cleaned = cleaned.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression, range: nil)
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -309,11 +338,24 @@ final class EnglishNewsService {
 
     private func isDisallowedContent(_ text: String) -> Bool {
         let lower = text.lowercased()
+
+        // Ignore photo credits, captions, disclaimers
+        if lower.hasPrefix("image source") ||
+           lower.hasPrefix("image caption") ||
+           lower.hasPrefix("media caption") ||
+           lower.hasPrefix("photo:") ||
+           lower.hasPrefix("credit:") ||
+           lower.hasPrefix("epa,") ||
+           lower.hasPrefix("getty images") {
+            return true
+        }
+
         let forbidden = [
-            "cookie", "privacy policy", "terms of use", "copyright",
-            "all rights reserved", "subscribe to", "advertisement",
-            "sign up for", "follow us on", "download the app",
-            "newsletter", "listen to the podcast"
+            "bbc homepage", "skip to content", "accessibility help", "cookie",
+            "privacy policy", "terms of use", "copyright", "all rights reserved",
+            "subscribe to", "advertisement", "sign up for", "follow us on",
+            "download the app", "newsletter", "listen to the podcast",
+            "share this story", "related topics", "more on this story", "click here to"
         ]
         return forbidden.contains { lower.contains($0) }
     }

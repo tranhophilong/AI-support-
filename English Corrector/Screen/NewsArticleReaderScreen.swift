@@ -6,11 +6,6 @@
 import SwiftUI
 import SwiftData
 
-struct NewsWordPickTarget: Hashable, Equatable {
-    let sectionID: String
-    var mode: WordInteractionMode = .pickWord
-}
-
 struct NewsArticleReaderScreen: View {
     let article: NewsArticleItem
 
@@ -21,26 +16,15 @@ struct NewsArticleReaderScreen: View {
 
     @State private var paragraphs: [String] = []
     @State private var isLoadingContent = true
-    @State private var fontSizeMultiplier: CGFloat = 1.0 // 0.9, 1.0, 1.15
-
-    // Word Pick & Interaction State
-    @State private var pickingTarget: NewsWordPickTarget?
+    @State private var fontSizeMultiplier: CGFloat = 1.0 // 0.9, 1.0, 1.2
     @State private var toastMessage: String?
 
-    // Word Lookup & Sentence Analysis Popovers
+    // Word Lookup Popover & Sheet
     @State private var selectedWord: String?
     @State private var selectedWordContext: String?
     @State private var wordLookupResult: AIVocabularyLookupResponse?
     @State private var isLoadingWordLookup = false
     @State private var showWordLookupSheet = false
-
-    @State private var selectedSentenceForAnalysis: String?
-    @State private var showSentenceAnalysisSheet = false
-
-    // TTS Audio state
-    @State private var isPlayingAudio = false
-    @State private var currentAudioParagraphIndex: Int = 0
-    @State private var speechRate: Float = 1.0 // 0.8, 1.0, 1.2
 
     private var savedVocabularyWords: Set<String> {
         Set(vocabularyNotes.map(\.normalizedWord))
@@ -53,21 +37,16 @@ struct NewsArticleReaderScreen: View {
                     .ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 20) {
                         articleHeaderSection
 
                         articleBodySection
 
                         originalArticleLinkSection
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 100) // Space for audio player bar
-                }
-
-                if isPlayingAudio || speechManager.speakingText != nil {
-                    audioPlayerBottomBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.horizontal, 18)
+                    .padding(.top, 14)
+                    .padding(.bottom, 40)
                 }
 
                 if let toastMessage {
@@ -75,12 +54,11 @@ struct NewsArticleReaderScreen: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .navigationTitle("Reader Mode")
+            .navigationTitle("Báo tiếng Anh")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        stopAudio()
                         dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -92,17 +70,6 @@ struct NewsArticleReaderScreen: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     fontSizeMenu
 
-                    Button {
-                        if isPlayingAudio {
-                            stopAudio()
-                        } else {
-                            startAudioReading()
-                        }
-                    } label: {
-                        Image(systemName: isPlayingAudio ? "speaker.wave.3.fill" : "speaker.wave.2")
-                            .foregroundStyle(isPlayingAudio ? AppTheme.Primary.p500 : AppTheme.Neutral.n700)
-                    }
-
                     ShareLink(item: URL(string: article.link) ?? URL(string: "https://bbc.com")!) {
                         Image(systemName: "square.and.arrow.up")
                             .foregroundStyle(AppTheme.Neutral.n700)
@@ -112,29 +79,10 @@ struct NewsArticleReaderScreen: View {
             .task {
                 await loadArticleData()
             }
-            .onDisappear {
-                stopAudio()
-            }
             .sheet(isPresented: $showWordLookupSheet) {
                 wordLookupSheetView
                     .presentationDetents([.medium, .large])
-            }
-            .sheet(isPresented: $showSentenceAnalysisSheet) {
-                if let sentence = selectedSentenceForAnalysis {
-                    NewsSentenceAnalysisSheetView(
-                        initialText: sentence,
-                        onOpenFullStructure: { targetSentence in
-                            showSentenceAnalysisSheet = false
-                            openSentenceStructureAnalysis(for: targetSentence)
-                        },
-                        onSaveWord: { word, source in
-                            saveVocabulary(word, sourceText: source)
-                        },
-                        isWordSaved: { word in
-                            savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-                        }
-                    )
-                }
+                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -142,7 +90,7 @@ struct NewsArticleReaderScreen: View {
     // MARK: - Article Header Section
 
     private var articleHeaderSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             // Source & Category & PubDate
             HStack(spacing: 8) {
                 HStack(spacing: 4) {
@@ -174,107 +122,30 @@ struct NewsArticleReaderScreen: View {
                 Spacer()
             }
 
-            // Headline
-            let headlineSectionID = "headline"
-            let isPickingHeadline = pickingTarget?.sectionID == headlineSectionID
-            let activeHeadlineMode = isPickingHeadline ? pickingTarget?.mode : nil
-
-            VStack(alignment: .leading, spacing: 8) {
-                if let activeMode = activeHeadlineMode {
-                    WordPickerText(
-                        text: article.title,
-                        mode: activeMode,
-                        foregroundStyle: AppTheme.Neutral.n900,
-                        chipBackground: AppTheme.Surface.card,
-                        modeBackground: AppTheme.Accent.a50,
-                        savedWords: savedVocabularyWords,
-                        onPick: { word in
-                            saveVocabulary(word, sourceText: article.title)
-                        },
-                        onDone: {
-                            pickingTarget = nil
-                        }
-                    )
-                } else {
-                    Text(article.title)
-                        .font(.system(size: 24 * fontSizeMultiplier, weight: .bold, design: .serif))
-                        .foregroundStyle(AppTheme.Neutral.n900)
-                        .lineSpacing(4)
-                        .contextMenu {
-                            itemContextMenu(text: article.title, sectionID: headlineSectionID)
-                        }
-
-                    HStack(spacing: 12) {
-                        Button {
-                            speechManager.toggleSpeak(article.title)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "speaker.wave.1.fill")
-                                    .font(.caption2)
-                                Text("Nghe")
-                                    .font(.caption2.bold())
-                            }
-                            .foregroundStyle(AppTheme.Neutral.n700)
-                        }
-
-                        Button {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                                pickingTarget = NewsWordPickTarget(sectionID: headlineSectionID, mode: .pickWord)
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "hand.tap")
-                                    .font(.caption2)
-                                Text("Pick word")
-                                    .font(.caption2.bold())
-                            }
-                            .foregroundStyle(AppTheme.Primary.p700)
-                        }
-
-                        Button {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                                pickingTarget = NewsWordPickTarget(sectionID: headlineSectionID, mode: .lightPickWord)
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "character.book.closed.fill")
-                                    .font(.caption2)
-                                Text("Light pick")
-                                    .font(.caption2.bold())
-                            }
-                            .foregroundStyle(AppTheme.Accent.a600)
-                        }
-
-                        Button {
-                            selectedSentenceForAnalysis = article.title
-                            showSentenceAnalysisSheet = true
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "text.magnifyingglass")
-                                    .font(.caption2)
-                                Text("Ngữ pháp")
-                                    .font(.caption2.bold())
-                            }
-                            .foregroundStyle(AppTheme.Primary.p500)
-                        }
-
-                        Button {
-                            copyText(article.title)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.caption2)
-                                Text("Copy")
-                                    .font(.caption2.bold())
-                            }
-                            .foregroundStyle(AppTheme.Neutral.n500)
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.top, 2)
+            // Headline (Tap any word to look up)
+            InteractiveArticleTextView(
+                text: article.title,
+                fontSize: 22 * fontSizeMultiplier,
+                isTitle: true,
+                savedWords: savedVocabularyWords,
+                onLookupWord: { word in
+                    lookupWordDirectly(word, contextSentence: article.title)
                 }
+            )
+
+            // Hint Pill
+            HStack(spacing: 5) {
+                Image(systemName: "hand.tap.fill")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Primary.p500)
+                Text("Chạm vào từ bất kỳ để tra nghĩa & lưu từ vựng")
+                    .font(.caption2.bold())
+                    .foregroundStyle(AppTheme.Text.secondary)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(AppTheme.Primary.p50.opacity(0.6))
+            .clipShape(Capsule())
 
             // Hero Image
             if let imgURL = article.imageURL, let url = URL(string: imgURL) {
@@ -310,139 +181,41 @@ struct NewsArticleReaderScreen: View {
     // MARK: - Article Body Section
 
     private var articleBodySection: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
             if isLoadingContent {
                 VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Đang bóc tách nội dung bài viết sạch...")
+                    AppThemeLoadingView(customSize: 26)
+                    Text("Đang tải nội dung chính xác của bài báo...")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
-            } else {
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    paragraphCardView(index: index, paragraph: paragraph)
-                }
-            }
-        }
-    }
-
-    private func paragraphCardView(index: Int, paragraph: String) -> some View {
-        let sectionID = "paragraph-\(index)"
-        let isHighlighted = isPlayingAudio && currentAudioParagraphIndex == index
-        let isSpeakingThis = speechManager.speakingText == paragraph
-        let isPicking = pickingTarget?.sectionID == sectionID
-        let activeMode = isPicking ? pickingTarget?.mode : nil
-
-        return VStack(alignment: .leading, spacing: 10) {
-            if let activeMode {
-                WordPickerText(
-                    text: paragraph,
-                    mode: activeMode,
-                    foregroundStyle: AppTheme.Neutral.n900,
-                    chipBackground: AppTheme.Surface.card,
-                    modeBackground: AppTheme.Accent.a50,
-                    savedWords: savedVocabularyWords,
-                    onPick: { word in
-                        saveVocabulary(word, sourceText: paragraph)
-                    },
-                    onDone: {
-                        pickingTarget = nil
-                    }
-                )
-            } else {
-                Text(paragraph)
-                    .font(.system(size: 17 * fontSizeMultiplier, weight: .regular, design: .serif))
-                    .foregroundStyle(AppTheme.Neutral.n900)
-                    .lineSpacing(6 * fontSizeMultiplier)
-                    .textSelection(.enabled)
-                    .contextMenu {
-                        itemContextMenu(text: paragraph, sectionID: sectionID)
-                    }
-
-                // Paragraph helper actions toolbar
-                HStack(spacing: 12) {
-                    Button {
-                        if isSpeakingThis {
-                            speechManager.stop()
-                        } else {
-                            playSingleParagraphAudio(paragraph, index: index)
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: isSpeakingThis ? "stop.circle.fill" : "speaker.wave.1.fill")
-                                .font(.caption2)
-                            Text(isSpeakingThis ? "Dừng" : "Nghe")
-                                .font(.caption2.bold())
-                        }
-                        .foregroundStyle(isSpeakingThis ? AppTheme.Semantic.warning : AppTheme.Neutral.n700)
-                    }
-
-                    Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .pickWord)
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "hand.tap")
-                                .font(.caption2)
-                            Text("Pick word")
-                                .font(.caption2.bold())
-                        }
-                        .foregroundStyle(AppTheme.Primary.p700)
-                    }
-
-                    Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .lightPickWord)
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "character.book.closed.fill")
-                                .font(.caption2)
-                            Text("Light pick")
-                                .font(.caption2.bold())
-                        }
-                        .foregroundStyle(AppTheme.Accent.a600)
-                    }
-
-                    Button {
-                        selectedSentenceForAnalysis = paragraph
-                        showSentenceAnalysisSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "text.magnifyingglass")
-                                .font(.caption2)
-                            Text("Phân tích")
-                                .font(.caption2.bold())
-                        }
-                        .foregroundStyle(AppTheme.Primary.p500)
-                    }
-
-                    Button {
-                        copyText(paragraph)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.caption2)
-                            Text("Copy")
-                                .font(.caption2.bold())
-                        }
+            } else if paragraphs.isEmpty {
+                VStack(spacing: 10) {
+                    Text("Không tìm thấy nội dung bài báo.")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(AppTheme.Neutral.n700)
+                    Text("Bạn có thể mở bài viết gốc bằng liên kết bên dưới.")
+                        .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)
-                    }
-
-                    Spacer()
                 }
-                .padding(.top, 4)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+            } else {
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                    InteractiveArticleTextView(
+                        text: paragraph,
+                        fontSize: 17 * fontSizeMultiplier,
+                        isTitle: false,
+                        savedWords: savedVocabularyWords,
+                        onLookupWord: { word in
+                            lookupWordDirectly(word, contextSentence: paragraph)
+                        }
+                    )
+                    .padding(.vertical, 2)
+                }
             }
-        }
-        .padding(14)
-        .background(isHighlighted ? AppTheme.Primary.p50 : Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isHighlighted ? AppTheme.Primary.p500 : AppTheme.Neutral.n200, lineWidth: 0.5)
         }
     }
 
@@ -464,66 +237,6 @@ struct NewsArticleReaderScreen: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
-    }
-
-    // MARK: - Floating Audio Player Bar
-
-    private var audioPlayerBottomBar: some View {
-        HStack(spacing: 14) {
-            Button {
-                togglePlayPauseAudio()
-            } label: {
-                Image(systemName: (speechManager.speakingText != nil) ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(AppTheme.Primary.p500)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(article.title)
-                    .font(.caption.bold())
-                    .lineLimit(1)
-                    .foregroundStyle(AppTheme.Neutral.n900)
-
-                Text("Đoạn \(currentAudioParagraphIndex + 1) / \(max(1, paragraphs.count))")
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.Neutral.n500)
-            }
-
-            Spacer()
-
-            // Speed toggle
-            Button {
-                cycleSpeechRate()
-            } label: {
-                Text(String(format: "%.1fx", speechRate))
-                    .font(.caption.bold())
-                    .foregroundStyle(AppTheme.Neutral.n700)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(AppTheme.Neutral.n100)
-                    .clipShape(Capsule())
-            }
-
-            Button {
-                stopAudio()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.bold())
-                    .foregroundStyle(AppTheme.Neutral.n500)
-                    .padding(6)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(AppTheme.Neutral.n200, lineWidth: 0.5)
-        }
-        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 3)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 
     // MARK: - Font Size Menu
@@ -552,7 +265,7 @@ struct NewsArticleReaderScreen: View {
             VStack(spacing: 16) {
                 if isLoadingWordLookup {
                     VStack(spacing: 12) {
-                        ProgressView()
+                        AppThemeLoadingView(customSize: 24)
                         Text("Đang tra từ vựng...")
                             .font(.subheadline)
                             .foregroundStyle(AppTheme.Neutral.n500)
@@ -571,7 +284,7 @@ struct NewsArticleReaderScreen: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(16)
+            .padding(18)
             .navigationTitle("Tra từ vựng")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -579,6 +292,8 @@ struct NewsArticleReaderScreen: View {
                     Button("Đóng") {
                         showWordLookupSheet = false
                     }
+                    .font(.subheadline.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
                 }
             }
         }
@@ -677,7 +392,10 @@ struct NewsArticleReaderScreen: View {
     }
 
     private func lookupWordDirectly(_ word: String, contextSentence: String?) {
-        selectedWord = word
+        let cleaned = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
+        selectedWord = cleaned
         selectedWordContext = contextSentence
         showWordLookupSheet = true
         isLoadingWordLookup = true
@@ -687,7 +405,7 @@ struct NewsArticleReaderScreen: View {
             do {
                 let service = VocabularyAIService()
                 let result = try await service.lookupWord(
-                    word: word,
+                    word: cleaned,
                     context: contextSentence
                 )
                 await MainActor.run {
@@ -702,17 +420,6 @@ struct NewsArticleReaderScreen: View {
         }
     }
 
-    private func inspectWordsInParagraph(_ paragraph: String) {
-        // Extract words from paragraph to let user pick one
-        let words = paragraph
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count >= 3 && !$0.allSatisfy(\.isNumber) }
-
-        if let first = words.first {
-            lookupWordDirectly(first, contextSentence: paragraph)
-        }
-    }
-
     private func saveWordToNotebook(_ lookup: AIVocabularyLookupResponse) {
         do {
             _ = try VocabularyNoteStore.saveLookupResult(
@@ -723,53 +430,7 @@ struct NewsArticleReaderScreen: View {
             )
             showToast("Đã lưu \"\(lookup.word)\" vào Sổ tay")
         } catch {
-            // Handled
-        }
-    }
-
-    // MARK: - Context Menu for News Items
-
-    @ViewBuilder
-    private func itemContextMenu(text: String, sectionID: String) -> some View {
-        Button {
-            speechManager.toggleSpeak(text)
-        } label: {
-            Label("Nghe phát âm", systemImage: "speaker.wave.2.fill")
-        }
-
-        Button {
-            copyText(text)
-        } label: {
-            Label("Sao chép", systemImage: "doc.on.doc")
-        }
-
-        Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .pickWord)
-            }
-        } label: {
-            Label("Pick word", systemImage: "hand.tap")
-        }
-
-        Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .lightPickWord)
-            }
-        } label: {
-            Label("Light pick word", systemImage: "character.book.closed.fill")
-        }
-
-        Button {
-            selectedSentenceForAnalysis = text
-            showSentenceAnalysisSheet = true
-        } label: {
-            Label("Light analysis", systemImage: "sparkles.rectangle.stack.fill")
-        }
-
-        Button {
-            openSentenceStructureAnalysis(for: text)
-        } label: {
-            Label("Phân tích cấu trúc câu", systemImage: "rectangle.3.group.fill")
+            print("DEBUG: Failed to save vocabulary: \(error)")
         }
     }
 
@@ -788,7 +449,7 @@ struct NewsArticleReaderScreen: View {
         .background(Color.black.opacity(0.85))
         .clipShape(Capsule())
         .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 3)
-        .padding(.bottom, isPlayingAudio ? 80 : 20)
+        .padding(.bottom, 20)
     }
 
     private func showToast(_ message: String) {
@@ -803,87 +464,49 @@ struct NewsArticleReaderScreen: View {
             }
         }
     }
+}
 
-    private func saveVocabulary(_ word: String, sourceText: String) {
-        do {
-            _ = try VocabularyNoteStore.save(
-                word: word,
-                sourceText: sourceText,
-                sourceConversation: nil,
-                in: modelContext
-            )
-            showToast("Đã lưu \"\(word)\" vào Sổ tay từ vựng")
-        } catch {
-            print("DEBUG: Failed to save vocabulary: \(error)")
+// MARK: - Interactive Article Text View (Tap to look up word)
+
+struct InteractiveArticleTextView: View {
+    let text: String
+    let fontSize: CGFloat
+    let isTitle: Bool
+    let savedWords: Set<String>
+    let onLookupWord: (String) -> Void
+
+    private var words: [(display: String, normalized: String)] {
+        text.split(whereSeparator: \.isWhitespace).map { raw in
+            let str = String(raw)
+            return (display: str, normalized: str.normalizedVocabularyWord)
         }
     }
 
-    private func copyText(_ text: String) {
-        UIPasteboard.general.string = text
-        showToast("Đã sao chép nội dung")
-    }
+    var body: some View {
+        WordPickerFlowLayout(spacing: isTitle ? 6 : 4, lineSpacing: isTitle ? 8 : 6) {
+            ForEach(Array(words.enumerated()), id: \.offset) { _, item in
+                let isSaved = !item.normalized.isEmpty && savedWords.contains(item.normalized)
 
-    private func openSentenceStructureAnalysis(for sentence: String) {
-        stopAudio()
-        dismiss()
-        NotificationCenter.default.post(name: .dismissNewsFeed, object: nil)
-        StructureNavigationCoordinator.shared.openAndAnalyze(sentence)
-    }
-
-    // MARK: - TTS Audio Reading
-
-    private func startAudioReading() {
-        guard !paragraphs.isEmpty else { return }
-        isPlayingAudio = true
-        currentAudioParagraphIndex = 0
-        readParagraphAtIndex(0)
-    }
-
-    private func readParagraphAtIndex(_ index: Int) {
-        guard index < paragraphs.count else {
-            isPlayingAudio = false
-            return
-        }
-        currentAudioParagraphIndex = index
-        let paragraph = paragraphs[index]
-
-        speechManager.speakWithCallback(paragraph, rateMultiplier: speechRate) {
-            if isPlayingAudio && currentAudioParagraphIndex == index {
-                readParagraphAtIndex(index + 1)
+                Button {
+                    guard !item.normalized.isEmpty else { return }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onLookupWord(item.normalized)
+                } label: {
+                    Text(item.display)
+                        .font(
+                            .system(
+                                size: fontSize,
+                                weight: isTitle ? .bold : .regular,
+                                design: .serif
+                            )
+                        )
+                        .foregroundStyle(isSaved ? AppTheme.Semantic.success : AppTheme.Neutral.n900)
+                        .underline(isSaved, color: AppTheme.Semantic.success.opacity(0.55))
+                        .padding(.vertical, 1)
+                        .padding(.horizontal, 1)
+                }
+                .buttonStyle(.plain)
             }
         }
-    }
-
-    private func playSingleParagraphAudio(_ text: String, index: Int) {
-        isPlayingAudio = true
-        currentAudioParagraphIndex = index
-        speechManager.speakWithCallback(text, rateMultiplier: speechRate) {
-            isPlayingAudio = false
-        }
-    }
-
-    private func togglePlayPauseAudio() {
-        if speechManager.speakingText != nil {
-            speechManager.stop()
-            isPlayingAudio = false
-        } else {
-            isPlayingAudio = true
-            readParagraphAtIndex(currentAudioParagraphIndex)
-        }
-    }
-
-    private func cycleSpeechRate() {
-        if speechRate < 1.0 {
-            speechRate = 1.0
-        } else if speechRate < 1.2 {
-            speechRate = 1.2
-        } else {
-            speechRate = 0.8
-        }
-    }
-
-    private func stopAudio() {
-        speechManager.stop()
-        isPlayingAudio = false
     }
 }
