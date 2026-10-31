@@ -34,6 +34,8 @@ class MessageModel {
     var text: String
     var isUser: Bool
     var createdAt: Date = Date()
+    var imageData: Data?
+    var sceneDescriptionJSON: String?
 
     var conversation: ConversationModel?
 
@@ -55,7 +57,9 @@ class MessageModel {
         explanations: [String]? = nil,
         explanationNoted: [String]? = nil,
         followUpQuestion: String? = nil,
-        suggestedReplies: [String]? = nil
+        suggestedReplies: [String]? = nil,
+        imageData: Data? = nil,
+        sceneDescription: AISceneDescriptionResponse? = nil
     ) {
         self.text = text
         self.isUser = isUser
@@ -66,6 +70,32 @@ class MessageModel {
         self.explanationNoted = explanationNoted
         self.followUpQuestion = followUpQuestion
         self.suggestedReplies = suggestedReplies
+        self.imageData = imageData
+        if let sceneDescription,
+           let data = try? JSONEncoder().encode(sceneDescription),
+           let json = String(data: data, encoding: .utf8) {
+            self.sceneDescriptionJSON = json
+        }
+    }
+
+    var decodedSceneDescription: AISceneDescriptionResponse? {
+        get {
+            guard let sceneDescriptionJSON,
+                  let data = sceneDescriptionJSON.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(AISceneDescriptionResponse.self, from: data) else {
+                return nil
+            }
+            return decoded
+        }
+        set {
+            if let newValue,
+               let data = try? JSONEncoder().encode(newValue),
+               let json = String(data: data, encoding: .utf8) {
+                sceneDescriptionJSON = json
+            } else {
+                sceneDescriptionJSON = nil
+            }
+        }
     }
 }
 
@@ -257,6 +287,8 @@ class SituationAskMessageModel {
     var isUser: Bool
     var createdAt: Date = Date()
     var responseJSON: String?
+    var imageData: Data?
+    var sceneDescriptionJSON: String?
 
     var session: SituationAskSessionModel?
 
@@ -264,15 +296,23 @@ class SituationAskMessageModel {
         text: String,
         toneTag: String? = nil,
         isUser: Bool,
-        response: AISituationAskResponse? = nil
+        response: AISituationAskResponse? = nil,
+        imageData: Data? = nil,
+        sceneDescription: AISceneDescriptionResponse? = nil
     ) {
         self.text = text
         self.toneTag = toneTag
         self.isUser = isUser
+        self.imageData = imageData
         if let response,
            let data = try? JSONEncoder().encode(response),
            let json = String(data: data, encoding: .utf8) {
             self.responseJSON = json
+        }
+        if let sceneDescription,
+           let data = try? JSONEncoder().encode(sceneDescription),
+           let json = String(data: data, encoding: .utf8) {
+            self.sceneDescriptionJSON = json
         }
     }
 
@@ -292,6 +332,26 @@ class SituationAskMessageModel {
                 responseJSON = json
             } else {
                 responseJSON = nil
+            }
+        }
+    }
+
+    var decodedSceneDescription: AISceneDescriptionResponse? {
+        get {
+            guard let sceneDescriptionJSON,
+                  let data = sceneDescriptionJSON.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(AISceneDescriptionResponse.self, from: data) else {
+                return nil
+            }
+            return decoded
+        }
+        set {
+            if let newValue,
+               let data = try? JSONEncoder().encode(newValue),
+               let json = String(data: data, encoding: .utf8) {
+                sceneDescriptionJSON = json
+            } else {
+                sceneDescriptionJSON = nil
             }
         }
     }

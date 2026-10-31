@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import PhotosUI
 
 
 struct ChatScreen: View {
@@ -38,6 +39,11 @@ struct ChatScreen: View {
     @State private var suggestionTask: Task<Void, Never>?
 
     @StateObject private var speechRecognizer = SpeechRecognizerManager()
+
+    @State private var selectedAttachedImage: UIImage?
+    @State private var showCameraPicker = false
+    @State private var showPhotosPicker = false
+    @State private var photosPickerItem: PhotosPickerItem?
 
     @AppStorage("selectedAIModel") private var selectedAIModelRawValue = AIModelOption.groqGPTOSS20B.rawValue
 
@@ -146,10 +152,25 @@ struct ChatScreen: View {
 
                                     Group {
                                         if item.isUser {
+                                            let matchingScene = conversation.messages.first(where: {
+                                                !$0.isUser && $0.createdAt >= item.createdAt && $0.decodedSceneDescription != nil
+                                            })?.decodedSceneDescription
 
                                             UserBubble(
                                                 id: item.id,
                                                 text: item.text,
+                                                imageData: item.imageData,
+                                                sceneForImage: matchingScene,
+                                                onSaveWord: { wordItem in
+                                                    saveVocabulary(
+                                                        wordItem.word,
+                                                        sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)",
+                                                        showToast: true
+                                                    )
+                                                },
+                                                isWordSaved: { word in
+                                                    savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                                                },
                                                 pickingTarget: pickingTarget,
                                                 savedWords: savedVocabularyWords,
                                                 isHighlightedMessage: isHighlightedMsg,
@@ -226,6 +247,33 @@ struct ChatScreen: View {
                                                     deleteMessage(item)
                                                 }
                                             )
+                                        } else if let scene = item.decodedSceneDescription {
+                                            SceneDescriptionCardView(
+                                                scene: scene,
+                                                imageData: item.imageData,
+                                                onSaveWord: { wordItem in
+                                                    saveVocabulary(
+                                                        wordItem.word,
+                                                        sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)",
+                                                        showToast: true
+                                                    )
+                                                },
+                                                isWordSaved: { word in
+                                                    savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                                                }
+                                            )
+                                            .contextMenu {
+                                                Button(action: {
+                                                    copyText(scene.sceneOverview)
+                                                }) {
+                                                    Label("Sao chép mô tả", systemImage: "doc.on.doc")
+                                                }
+                                                Button(role: .destructive, action: {
+                                                    deleteMessage(item)
+                                                }) {
+                                                    Label("Xoá", systemImage: "trash")
+                                                }
+                                            }
                                         } else {
                                             StarterAIBubble(
                                                 messageID: item.id,
@@ -427,6 +475,22 @@ struct ChatScreen: View {
             }
             .fullScreenCover(isPresented: $showLiveVoiceMode) {
                 LiveVoiceConversationScreen(conversation: conversation)
+            }
+            .photosPicker(isPresented: $showPhotosPicker, selection: $photosPickerItem, matching: .images)
+            .onChange(of: photosPickerItem) { _, newItem in
+                guard let newItem else { return }
+                Task {
+                    if let data = try? await newItem.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data) {
+                        await MainActor.run {
+                            selectedAttachedImage = uiImage
+                        }
+                    }
+                }
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                CameraPickerView(selectedImage: $selectedAttachedImage)
+                    .ignoresSafeArea()
             }
 
             if showSnackbar {
@@ -643,6 +707,15 @@ struct ChatScreen: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
+            if let image = selectedAttachedImage {
+                InputBarImagePreviewView(image: image) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedAttachedImage = nil
+                        photosPickerItem = nil
+                    }
+                }
+            }
+
             if speechRecognizer.isRecording {
                 HStack(spacing: 8) {
                     Circle()
@@ -659,10 +732,39 @@ struct ChatScreen: View {
                 .transition(.opacity)
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button {
+                        showCameraPicker = true
+                    } label: {
+                        Label("Chụp ảnh mới", systemImage: "camera")
+                    }
+
+                    Button {
+                        showPhotosPicker = true
+                    } label: {
+                        Label("Chọn từ thư viện ảnh", systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .font(.headline)
+                        .foregroundStyle(selectedAttachedImage != nil ? AppTheme.Primary.p500 : AppTheme.Neutral.n700)
+                        .frame(width: 42, height: 42)
+                        .background(selectedAttachedImage != nil ? AppTheme.Primary.p50 : AppTheme.Surface.card)
+                        .clipShape(Circle())
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    selectedAttachedImage != nil ? AppTheme.Primary.p500 : AppTheme.Surface.border,
+                                    lineWidth: 0.5
+                                )
+                        }
+                }
+                .disabled(isLoading)
+                .accessibilityLabel("Chụp hoặc chọn ảnh cảnh vật")
 
                 TextField(
-                    speechRecognizer.isRecording ? "Speaking..." : "Write naturally...",
+                    speechRecognizer.isRecording ? "Speaking..." : (selectedAttachedImage != nil ? "Ask about this photo..." : "Write naturally..."),
                     text: $message,
                     axis: .vertical
                 )
@@ -708,6 +810,8 @@ struct ChatScreen: View {
                 .disabled(isLoading)
                 .accessibilityLabel(speechRecognizer.isRecording ? "Stop voice input" : "Start voice input")
 
+                let canSend = (!message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedAttachedImage != nil) && !isLoading
+
                 Button {
                     sendMessage()
                 } label: {
@@ -716,17 +820,13 @@ struct ChatScreen: View {
                         .foregroundStyle(.white)
                         .frame(width: 42, height: 42)
                         .background(
-                            message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                            isLoading
+                            !canSend
                             ? AppTheme.Neutral.n400
                             : AppTheme.Primary.p500
                         )
                         .clipShape(Circle())
                 }
-                .disabled(
-                    message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                    isLoading
-                )
+                .disabled(!canSend)
             }
         }
         .padding()
@@ -1036,18 +1136,23 @@ struct ChatScreen: View {
             speechRecognizer.stopRecording()
         }
 
-        let userText = message
+        let userText = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachedImage = selectedAttachedImage
 
-        guard !userText.isEmpty else { return }
+        guard !userText.isEmpty || attachedImage != nil else { return }
 
         message = ""
+        selectedAttachedImage = nil
+        photosPickerItem = nil
         isLoading = true
 
+        let imgData = attachedImage?.jpegData(compressionQuality: 0.8)
 
         // 1. SAVE USER MESSAGE (LOCAL)
         let userMessage = MessageModel(
-            text: userText,
-            isUser: true
+            text: userText.isEmpty ? "Describe what you see in this photo" : userText,
+            isUser: true,
+            imageData: imgData
         )
         userMessage.conversation = conversation
         context.insert(userMessage)
@@ -1057,6 +1162,36 @@ struct ChatScreen: View {
             print("DEBUG: User message saved successfully.")
         } catch {
             print("DEBUG: Failed to save user message: \(error)")
+        }
+
+        if let imgData {
+            Task {
+                do {
+                    let response = try await SceneVisionAIService.shared.describeScene(
+                        imageData: imgData,
+                        userPrompt: userText
+                    )
+
+                    await MainActor.run {
+                        let aiMessage = MessageModel(
+                            text: response.sceneOverview,
+                            isUser: false,
+                            imageData: imgData,
+                            sceneDescription: response
+                        )
+                        aiMessage.conversation = conversation
+                        context.insert(aiMessage)
+                        try? context.save()
+                        isLoading = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        isLoading = false
+                        showStatusMessage("Lỗi phân tích ảnh: \(error.localizedDescription)")
+                    }
+                }
+            }
+            return
         }
 
         // 2. PREPARE RECENT CONVERSATION HISTORY (LAST 20 MESSAGES)

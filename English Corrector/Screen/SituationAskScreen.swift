@@ -5,6 +5,8 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
+import PhotosUI
 
 enum SituationToneOption: String, CaseIterable, Identifiable {
     case auto = "Tự động"
@@ -57,6 +59,11 @@ struct SituationAskScreen: View {
     @State private var showSnackbar = false
     @State private var snackbarMessage = ""
     @State private var practiceConversationDestination: ConversationModel?
+
+    @State private var selectedAttachedImage: UIImage?
+    @State private var showCameraPicker = false
+    @State private var showPhotosPicker = false
+    @State private var photosPickerItem: PhotosPickerItem?
 
     @StateObject private var speechRecognizer = SpeechRecognizerManager()
 
@@ -121,8 +128,22 @@ struct SituationAskScreen: View {
                                         ForEach(sortedMessages) { item in
                                             Group {
                                                 if item.isUser {
+                                                    let matchingScene = sortedMessages.first(where: {
+                                                        !$0.isUser && $0.createdAt >= item.createdAt && $0.decodedSceneDescription != nil
+                                                    })?.decodedSceneDescription
+
                                                     SituationUserBubble(
                                                         message: item,
+                                                        sceneForImage: matchingScene,
+                                                        onSaveWord: { wordItem in
+                                                            saveVocabulary(
+                                                                wordItem.word,
+                                                                sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)"
+                                                            )
+                                                        },
+                                                        isWordSaved: { word in
+                                                            savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                                                        },
                                                         onCopy: {
                                                             copyText(item.text)
                                                         },
@@ -133,6 +154,32 @@ struct SituationAskScreen: View {
                                                             deleteMessage(item)
                                                         }
                                                     )
+                                                } else if let scene = item.decodedSceneDescription {
+                                                    SceneDescriptionCardView(
+                                                        scene: scene,
+                                                        imageData: item.imageData,
+                                                        onSaveWord: { wordItem in
+                                                            saveVocabulary(
+                                                                wordItem.word,
+                                                                sourceText: "\(wordItem.partOfSpeech) \(wordItem.phonetic): \(wordItem.vietnameseMeaning)"
+                                                            )
+                                                        },
+                                                        isWordSaved: { word in
+                                                            savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                                                        }
+                                                    )
+                                                    .contextMenu {
+                                                        Button(action: {
+                                                            copyText(scene.sceneOverview)
+                                                        }) {
+                                                            Label("Sao chép mô tả", systemImage: "doc.on.doc")
+                                                        }
+                                                        Button(role: .destructive, action: {
+                                                            deleteMessage(item)
+                                                        }) {
+                                                            Label("Xoá", systemImage: "trash")
+                                                        }
+                                                    }
                                                 } else if let response = item.decodedResponse {
                                                     SituationAIBubble(
                                                         messageID: item.id,
@@ -326,6 +373,22 @@ struct SituationAskScreen: View {
             }
             .navigationDestination(item: $practiceConversationDestination) { conversation in
                 ChatScreen(conversation: conversation)
+            }
+            .photosPicker(isPresented: $showPhotosPicker, selection: $photosPickerItem, matching: .images)
+            .onChange(of: photosPickerItem) { _, newItem in
+                guard let newItem else { return }
+                Task {
+                    if let data = try? await newItem.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data) {
+                        await MainActor.run {
+                            selectedAttachedImage = uiImage
+                        }
+                    }
+                }
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                CameraPickerView(selectedImage: $selectedAttachedImage)
+                    .ignoresSafeArea()
             }
             .sheet(isPresented: $showHistorySheet) {
                 SituationHistorySheet(
@@ -546,6 +609,15 @@ struct SituationAskScreen: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
+            if let image = selectedAttachedImage {
+                InputBarImagePreviewView(image: image) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedAttachedImage = nil
+                        photosPickerItem = nil
+                    }
+                }
+            }
+
             if speechRecognizer.isRecording {
                 HStack(spacing: 8) {
                     Circle()
@@ -561,11 +633,41 @@ struct SituationAskScreen: View {
                 .padding(.horizontal, 4)
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button {
+                        showCameraPicker = true
+                    } label: {
+                        Label("Chụp ảnh mới", systemImage: "camera")
+                    }
+
+                    Button {
+                        showPhotosPicker = true
+                    } label: {
+                        Label("Chọn từ thư viện ảnh", systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .font(.headline)
+                        .foregroundStyle(selectedAttachedImage != nil ? AppTheme.Primary.p500 : AppTheme.Neutral.n700)
+                        .frame(width: 42, height: 42)
+                        .background(selectedAttachedImage != nil ? AppTheme.Primary.p50 : AppTheme.Surface.card)
+                        .clipShape(Circle())
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    selectedAttachedImage != nil ? AppTheme.Primary.p500 : AppTheme.Surface.border,
+                                    lineWidth: 0.5
+                                )
+                        }
+                }
+                .disabled(isLoading)
+                .accessibilityLabel("Chụp hoặc chọn ảnh cảnh vật")
+
                 TextField(
                     speechRecognizer.isRecording
                     ? "Đang nghe..."
-                    : "Mô tả hoàn cảnh hoặc câu muốn nói bằng tiếng Anh...",
+                    : (selectedAttachedImage != nil ? "Nhập câu hỏi về ảnh (không bắt buộc)..." : "Mô tả hoàn cảnh hoặc câu muốn nói bằng tiếng Anh..."),
                     text: $inputText,
                     axis: .vertical
                 )
@@ -610,23 +712,23 @@ struct SituationAskScreen: View {
                 }
                 .disabled(isLoading)
 
+                let canSend = (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedAttachedImage != nil) && !isLoading
+
                 Button {
-                    sendQuestion(inputText)
+                    sendQuestion(inputText, attachedImage: selectedAttachedImage)
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(width: 42, height: 42)
                         .background(
-                            inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading
+                            !canSend
                             ? AppTheme.Neutral.n400
                             : AppTheme.Primary.p500
                         )
                         .clipShape(Circle())
                 }
-                .disabled(
-                    inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading
-                )
+                .disabled(!canSend)
             }
         }
         .padding()
@@ -673,15 +775,18 @@ struct SituationAskScreen: View {
     }
 
     @MainActor
-    private func sendQuestion(_ rawQuestion: String) {
+    private func sendQuestion(_ rawQuestion: String, attachedImage: UIImage? = nil) {
         if speechRecognizer.isRecording {
             speechRecognizer.stopRecording()
         }
 
         let trimmed = rawQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isLoading else { return }
+        guard (!trimmed.isEmpty || attachedImage != nil), !isLoading else { return }
 
         inputText = ""
+        let capturedImage = attachedImage
+        selectedAttachedImage = nil
+        photosPickerItem = nil
         errorMessage = nil
         pickingTarget = nil
 
@@ -689,16 +794,67 @@ struct SituationAskScreen: View {
         session.selectedTone = selectedTone.rawValue
         session.updatedAt = Date()
 
+        let imgData: Data? = capturedImage?.jpegData(compressionQuality: 0.8)
+
+        let displayText = trimmed.isEmpty ? "Mô tả cảnh vật trong ảnh này giúp mình" : trimmed
         let userMsg = SituationAskMessageModel(
-            text: trimmed,
+            text: displayText,
             toneTag: selectedTone == .auto ? nil : selectedTone.rawValue,
-            isUser: true
+            isUser: true,
+            imageData: imgData
         )
         userMsg.session = session
         context.insert(userMsg)
         try? context.save()
 
-        performAIRequest(for: trimmed, in: session, excludingMessageID: userMsg.id)
+        if let imgData {
+            performSceneVisionRequest(for: imgData, userPrompt: trimmed, in: session)
+        } else {
+            performAIRequest(for: trimmed, in: session, excludingMessageID: userMsg.id)
+        }
+    }
+
+    @MainActor
+    private func performSceneVisionRequest(
+        for imageData: Data,
+        userPrompt: String,
+        in session: SituationAskSessionModel
+    ) {
+        isLoading = true
+
+        Task {
+            do {
+                let response = try await SceneVisionAIService.shared.describeScene(
+                    imageData: imageData,
+                    userPrompt: userPrompt
+                )
+
+                await MainActor.run {
+                    let firstSentence = response.sceneOverview.components(separatedBy: ".").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !firstSentence.isEmpty && (session.title.isEmpty || session.title == "Hỏi đáp tình huống" || session.messages.filter(\.isUser).count <= 1) {
+                        session.title = String(firstSentence.prefix(32))
+                    }
+                    session.updatedAt = Date()
+
+                    let aiMsg = SituationAskMessageModel(
+                        text: response.sceneOverview,
+                        isUser: false,
+                        imageData: imageData,
+                        sceneDescription: response
+                    )
+                    aiMsg.session = session
+                    context.insert(aiMsg)
+                    try? context.save()
+
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isLoading = false
+                }
+            }
+        }
     }
 
     @MainActor
@@ -899,9 +1055,14 @@ struct SituationAskScreen: View {
 
 private struct SituationUserBubble: View {
     let message: SituationAskMessageModel
+    var sceneForImage: AISceneDescriptionResponse? = nil
+    var onSaveWord: ((AISceneObjectVocabularyItem) -> Void)? = nil
+    var isWordSaved: ((String) -> Bool)? = nil
     let onCopy: () -> Void
     let onAskAgain: () -> Void
     let onDelete: () -> Void
+
+    @State private var showViewer = false
 
     var body: some View {
         HStack {
@@ -922,24 +1083,72 @@ private struct SituationUserBubble: View {
                     .clipShape(Capsule())
                 }
 
-                Text(message.text)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(AppTheme.Primary.p500)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .contextMenu {
-                        Button(action: onCopy) {
-                            Label("Sao chép", systemImage: "doc.on.doc")
+                if let imageData = message.imageData, let uiImage = UIImage(data: imageData) {
+                    Button {
+                        if sceneForImage != nil {
+                            showViewer = true
                         }
-                        Button(action: onAskAgain) {
-                            Label("Đưa vào ô nhập", systemImage: "arrowshape.turn.up.left")
-                        }
-                        Button(role: .destructive, action: onDelete) {
-                            Label("Xoá", systemImage: "trash")
+                    } label: {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: 220, maxHeight: 180)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                                }
+
+                            if sceneForImage != nil {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "hand.tap.fill")
+                                        .font(.system(size: 9))
+                                    Text("Xem từ vựng")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(AppTheme.Neutral.n900.opacity(0.8))
+                                .clipShape(Capsule())
+                                .padding(6)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .fullScreenCover(isPresented: $showViewer) {
+                        if let scene = sceneForImage {
+                            InteractiveSceneImageViewerSheet(
+                                image: uiImage,
+                                scene: scene,
+                                onSaveWord: onSaveWord,
+                                isWordSaved: isWordSaved
+                            )
+                        }
+                    }
+                }
+
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.Primary.p500)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .contextMenu {
+                            Button(action: onCopy) {
+                                Label("Sao chép", systemImage: "doc.on.doc")
+                            }
+                            Button(action: onAskAgain) {
+                                Label("Đưa vào ô nhập", systemImage: "arrowshape.turn.up.left")
+                            }
+                            Button(role: .destructive, action: onDelete) {
+                                Label("Xoá", systemImage: "trash")
+                            }
+                        }
+                }
             }
         }
     }

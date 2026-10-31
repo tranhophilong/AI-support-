@@ -10,6 +10,10 @@ struct UserBubble: View {
 
     let id: UUID
     let text: String
+    var imageData: Data? = nil
+    var sceneForImage: AISceneDescriptionResponse? = nil
+    var onSaveWord: ((AISceneObjectVocabularyItem) -> Void)? = nil
+    var isWordSaved: ((String) -> Bool)? = nil
     let pickingTarget: WordPickTarget?
     let savedWords: Set<String>
     var isHighlightedMessage: Bool = false
@@ -20,6 +24,8 @@ struct UserBubble: View {
     let onStopPickingWords: () -> Void
     let onFollowUp: () -> Void
     let onDelete: () -> Void
+
+    @State private var showViewer = false
 
     var body: some View {
         let baseTarget = WordPickTarget(messageID: id, section: "message")
@@ -47,7 +53,54 @@ struct UserBubble: View {
                     }
                 }
 
-                Group {
+                if let imageData, let uiImage = UIImage(data: imageData) {
+                    Button {
+                        if sceneForImage != nil {
+                            showViewer = true
+                        }
+                    } label: {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: 220, maxHeight: 180)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                                }
+
+                            if sceneForImage != nil {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "hand.tap.fill")
+                                        .font(.system(size: 9))
+                                    Text("Xem từ vựng")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(AppTheme.Neutral.n900.opacity(0.8))
+                                .clipShape(Capsule())
+                                .padding(6)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .fullScreenCover(isPresented: $showViewer) {
+                        if let scene = sceneForImage {
+                            InteractiveSceneImageViewerSheet(
+                                image: uiImage,
+                                scene: scene,
+                                onSaveWord: onSaveWord,
+                                isWordSaved: isWordSaved
+                            )
+                        }
+                    }
+                }
+
+                if !text.isEmpty {
+                    Group {
                     if let activeTarget = pickingTarget, activeTarget.matchesSection(baseTarget) {
                         WordPickerText(
                             text: text,
@@ -99,6 +152,7 @@ struct UserBubble: View {
                     x: 0,
                     y: 4
                 )
+                }
             }
         }
     }

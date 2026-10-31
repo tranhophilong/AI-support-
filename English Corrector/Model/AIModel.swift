@@ -306,8 +306,209 @@ struct MistakeCategoryReminderConfig: Codable, Equatable, Hashable {
     let minute: Int
 }
 
+// MARK: - AI Scene & Camera Vision Description
 
+struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
+    var id: String { "\(word)-\(vietnameseMeaning)-\(xPercent ?? 0)-\(yPercent ?? 0)" }
+    let word: String
+    let phonetic: String
+    let partOfSpeech: String
+    let vietnameseMeaning: String
+    let exampleInContext: String
+    let xPercent: Double?
+    let yPercent: Double?
+    let box2d: [Double]?
 
+    init(
+        word: String,
+        phonetic: String = "",
+        partOfSpeech: String = "Noun",
+        vietnameseMeaning: String = "",
+        exampleInContext: String = "",
+        xPercent: Double? = nil,
+        yPercent: Double? = nil,
+        box2d: [Double]? = nil
+    ) {
+        self.word = word
+        self.phonetic = phonetic
+        self.partOfSpeech = partOfSpeech
+        self.vietnameseMeaning = vietnameseMeaning
+        self.exampleInContext = exampleInContext
+        self.xPercent = xPercent
+        self.yPercent = yPercent
+        self.box2d = box2d
+    }
 
+    enum CodingKeys: String, CodingKey {
+        case word
+        case label
+        case phonetic
+        case partOfSpeech = "part_of_speech"
+        case partOfSpeechAlt = "partOfSpeech"
+        case vietnameseMeaning = "vietnamese_meaning"
+        case vietnameseMeaningAlt = "vietnameseMeaning"
+        case exampleInContext = "example_in_context"
+        case exampleInContextAlt = "exampleInContext"
+        case xPercent
+        case xPercentAlt = "x_percent"
+        case yPercent
+        case yPercentAlt = "y_percent"
+        case box2d = "box_2d"
+        case box2dAlt = "box2d"
+        case bbox
+        case box
+    }
 
+    init(from decoder: Decoder) throws {
+        if let singleValue = try? decoder.singleValueContainer(),
+           let stringWord = try? singleValue.decode(String.self) {
+            self.word = stringWord
+            self.phonetic = ""
+            self.partOfSpeech = "Noun"
+            self.vietnameseMeaning = stringWord
+            self.exampleInContext = ""
+            self.xPercent = nil
+            self.yPercent = nil
+            self.box2d = nil
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.word = (try? container.decode(String.self, forKey: .word))
+            ?? (try? container.decode(String.self, forKey: .label))
+            ?? ""
+        self.phonetic = (try? container.decode(String.self, forKey: .phonetic)) ?? ""
+        self.partOfSpeech = (try? container.decode(String.self, forKey: .partOfSpeech))
+            ?? (try? container.decode(String.self, forKey: .partOfSpeechAlt))
+            ?? "Noun"
+        self.vietnameseMeaning = (try? container.decode(String.self, forKey: .vietnameseMeaning))
+            ?? (try? container.decode(String.self, forKey: .vietnameseMeaningAlt))
+            ?? ""
+        self.exampleInContext = (try? container.decode(String.self, forKey: .exampleInContext))
+            ?? (try? container.decode(String.self, forKey: .exampleInContextAlt))
+            ?? ""
+
+        let decodedBox = (try? container.decode([Double].self, forKey: .box2d))
+            ?? (try? container.decode([Double].self, forKey: .box2dAlt))
+            ?? (try? container.decode([Double].self, forKey: .bbox))
+            ?? (try? container.decode([Double].self, forKey: .box))
+        self.box2d = decodedBox
+
+        var computedX: Double?
+        var computedY: Double?
+
+        // Visual grounding box calculation [ymin, xmin, ymax, xmax]
+        if let box = decodedBox, box.count >= 4 {
+            let ymin = box[0]
+            let xmin = box[1]
+            let ymax = box[2]
+            let xmax = box[3]
+
+            let midX = (xmin + xmax) / 2.0
+            let midY = (ymin + ymax) / 2.0
+
+            if max(xmax, ymax) > 100.0 {
+                // 0-1000 scale (standard Qwen/Groq visual grounding)
+                computedX = max(0.0, min(100.0, midX / 10.0))
+                computedY = max(0.0, min(100.0, midY / 10.0))
+            } else if max(xmax, ymax) <= 1.0 && max(xmax, ymax) > 0.0 {
+                // 0-1 scale
+                computedX = max(0.0, min(100.0, midX * 100.0))
+                computedY = max(0.0, min(100.0, midY * 100.0))
+            } else {
+                // 0-100 scale
+                computedX = max(0.0, min(100.0, midX))
+                computedY = max(0.0, min(100.0, midY))
+            }
+        }
+
+        if let computedX, let computedY {
+            self.xPercent = computedX
+            self.yPercent = computedY
+        } else {
+            if let x = try? container.decode(Double.self, forKey: .xPercent) {
+                self.xPercent = x
+            } else if let x = try? container.decode(Double.self, forKey: .xPercentAlt) {
+                self.xPercent = x
+            } else if let xInt = try? container.decode(Int.self, forKey: .xPercent) {
+                self.xPercent = Double(xInt)
+            } else if let xInt = try? container.decode(Int.self, forKey: .xPercentAlt) {
+                self.xPercent = Double(xInt)
+            } else {
+                self.xPercent = nil
+            }
+
+            if let y = try? container.decode(Double.self, forKey: .yPercent) {
+                self.yPercent = y
+            } else if let y = try? container.decode(Double.self, forKey: .yPercentAlt) {
+                self.yPercent = y
+            } else if let yInt = try? container.decode(Int.self, forKey: .yPercent) {
+                self.yPercent = Double(yInt)
+            } else if let yInt = try? container.decode(Int.self, forKey: .yPercentAlt) {
+                self.yPercent = Double(yInt)
+            } else {
+                self.yPercent = nil
+            }
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(word, forKey: .word)
+        try container.encode(phonetic, forKey: .phonetic)
+        try container.encode(partOfSpeech, forKey: .partOfSpeechAlt)
+        try container.encode(vietnameseMeaning, forKey: .vietnameseMeaningAlt)
+        try container.encode(exampleInContext, forKey: .exampleInContextAlt)
+        try container.encodeIfPresent(xPercent, forKey: .xPercent)
+        try container.encodeIfPresent(yPercent, forKey: .yPercent)
+        try container.encodeIfPresent(box2d, forKey: .box2d)
+    }
+}
+
+struct AISceneDescriptionResponse: Codable, Equatable {
+    let sceneOverview: String
+    let sceneVietnameseTranslation: String
+    let objectsDetected: [AISceneObjectVocabularyItem]
+    let situationalConversationalPhrases: [String]
+    let adviceOrCulturalNote: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sceneOverview
+        case sceneVietnameseTranslation
+        case objectsDetected
+        case situationalConversationalPhrases
+        case adviceOrCulturalNote
+    }
+
+    init(
+        sceneOverview: String,
+        sceneVietnameseTranslation: String,
+        objectsDetected: [AISceneObjectVocabularyItem],
+        situationalConversationalPhrases: [String],
+        adviceOrCulturalNote: String? = nil
+    ) {
+        self.sceneOverview = sceneOverview
+        self.sceneVietnameseTranslation = sceneVietnameseTranslation
+        self.objectsDetected = objectsDetected
+        self.situationalConversationalPhrases = situationalConversationalPhrases
+        self.adviceOrCulturalNote = adviceOrCulturalNote
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sceneOverview = (try? container.decode(String.self, forKey: .sceneOverview)) ?? ""
+        self.sceneVietnameseTranslation = (try? container.decode(String.self, forKey: .sceneVietnameseTranslation)) ?? ""
+        self.objectsDetected = (try? container.decode([AISceneObjectVocabularyItem].self, forKey: .objectsDetected)) ?? []
+
+        if let phrases = try? container.decode([String].self, forKey: .situationalConversationalPhrases) {
+            self.situationalConversationalPhrases = phrases
+        } else if let dict = try? container.decode([String: String].self, forKey: .situationalConversationalPhrases) {
+            self.situationalConversationalPhrases = Array(dict.values)
+        } else {
+            self.situationalConversationalPhrases = []
+        }
+
+        self.adviceOrCulturalNote = try? container.decode(String.self, forKey: .adviceOrCulturalNote)
+    }
+}
 
