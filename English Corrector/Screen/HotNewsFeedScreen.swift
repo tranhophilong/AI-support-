@@ -78,6 +78,9 @@ struct HotNewsFeedScreen: View {
             .fullScreenCover(item: $selectedArticleForReading) { article in
                 NewsArticleReaderScreen(article: article)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .dismissNewsFeed)) { _ in
+                dismiss()
+            }
         }
     }
 

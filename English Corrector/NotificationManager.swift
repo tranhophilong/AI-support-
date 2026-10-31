@@ -264,3 +264,7 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 }
+
+extension Notification.Name {
+    static let dismissNewsFeed = Notification.Name("dismissNewsFeed")
+}

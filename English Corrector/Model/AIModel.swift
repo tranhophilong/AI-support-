@@ -81,6 +81,8 @@ struct GroqChatCompletionRequest: Codable {
     let model: String
     let messages: [GroqMessage]
     let temperature: Double
+    var max_tokens: Int? = nil
+    var response_format: [String: String]? = nil
 }
 
 struct GroqMessage: Codable {

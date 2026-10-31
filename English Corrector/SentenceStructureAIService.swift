@@ -350,6 +350,12 @@ final class GroqSentenceStructureAIProvider: SentenceStructureAIProvider {
 
     func analyzeSentence(sentence: String) async throws -> AISentenceStructureResponse {
         guard !apiKey.isEmpty else {
+            // Fallback immediately if Groq key is missing
+            let geminiKey = APIKeyStore.geminiAPIKey
+            if !geminiKey.isEmpty {
+                let fallback = GeminiSentenceStructureAIProvider(apiKey: geminiKey)
+                return try await fallback.analyzeSentence(sentence: sentence)
+            }
             throw AIServiceError.missingAPIKey(provider: name, keyName: "GROQ_API_KEY")
         }
 
@@ -364,11 +370,22 @@ final class GroqSentenceStructureAIProvider: SentenceStructureAIProvider {
                 ),
                 GroqMessage(role: "user", content: prompt.user)
             ],
-            temperature: 0.2
+            temperature: 0.2,
+            max_tokens: 4096
         )
 
-        let content = try await sendRequest(body: body)
-        return try AISentenceStructureResponse.decodeFromAIContent(content)
+        do {
+            let content = try await sendRequest(body: body)
+            return try AISentenceStructureResponse.decodeFromAIContent(content)
+        } catch {
+            print("DEBUG: Groq structure analysis failed: \(error). Falling back to Gemini Flash...")
+            let geminiKey = APIKeyStore.geminiAPIKey
+            if !geminiKey.isEmpty {
+                let fallback = GeminiSentenceStructureAIProvider(apiKey: geminiKey)
+                return try await fallback.analyzeSentence(sentence: sentence)
+            }
+            throw error
+        }
     }
 
     func askFollowUp(
@@ -397,7 +414,8 @@ final class GroqSentenceStructureAIProvider: SentenceStructureAIProvider {
                 ),
                 GroqMessage(role: "user", content: prompt.user)
             ],
-            temperature: 0.25
+            temperature: 0.25,
+            max_tokens: 2048
         )
 
         let content = try await sendRequest(body: body)
@@ -539,23 +557,30 @@ private extension AISentenceStructureResponse {
     }
 
     static func strippedMarkdownFence(from content: String) -> String {
-        guard content.hasPrefix("```") else {
-            return content
+        var text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 1. Remove <think>...</think> reasoning blocks
+        if let thinkEnd = text.range(of: "</think>") {
+            text = String(text[thinkEnd.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        var lines = content.components(separatedBy: .newlines)
-
-        if lines.first?.hasPrefix("```") == true {
-            lines.removeFirst()
+        // 2. Extract content within markdown ```json ... ``` code fence
+        if let firstFence = text.range(of: "```") {
+            let afterFirst = text[firstFence.upperBound...]
+            let afterNewline = afterFirst.drop(while: { !$0.isNewline }).dropFirst()
+            if let secondFence = afterNewline.range(of: "```", options: .backwards) {
+                return String(afterNewline[..<secondFence.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
 
-        if lines.last?.hasPrefix("```") == true {
-            lines.removeLast()
+        // 3. Fallback: extract substring between first '{' and last '}'
+        if let firstBrace = text.firstIndex(of: "{"),
+           let lastBrace = text.lastIndex(of: "}"),
+           firstBrace <= lastBrace {
+            return String(text[firstBrace...lastBrace])
         }
 
-        return lines
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text
     }
 }
 

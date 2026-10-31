@@ -21,9 +21,6 @@ struct NewsArticleReaderScreen: View {
 
     @State private var paragraphs: [String] = []
     @State private var isLoadingContent = true
-    @State private var aiSummary: NewsAISummary?
-    @State private var isLoadingSummary = false
-    @State private var showSummaryCard = true
     @State private var fontSizeMultiplier: CGFloat = 1.0 // 0.9, 1.0, 1.15
 
     // Word Pick & Interaction State
@@ -58,12 +55,6 @@ struct NewsArticleReaderScreen: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         articleHeaderSection
-
-                        if isLoadingSummary {
-                            summaryLoadingView
-                        } else if let summary = aiSummary, showSummaryCard {
-                            aiSummaryCardView(summary)
-                        }
 
                         articleBodySection
 
@@ -130,25 +121,19 @@ struct NewsArticleReaderScreen: View {
             }
             .sheet(isPresented: $showSentenceAnalysisSheet) {
                 if let sentence = selectedSentenceForAnalysis {
-                    NavigationStack {
-                        QuickSentenceAnalysisPopoverView(
-                            sentence: sentence,
-                            onOpenFullAnalysis: {
-                                showSentenceAnalysisSheet = false
-                                openSentenceStructureAnalysis(for: sentence)
-                            }
-                        )
-                        .navigationTitle("Phân tích cấu trúc câu")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Đóng") {
-                                    showSentenceAnalysisSheet = false
-                                }
-                            }
+                    NewsSentenceAnalysisSheetView(
+                        initialText: sentence,
+                        onOpenFullStructure: { targetSentence in
+                            showSentenceAnalysisSheet = false
+                            openSentenceStructureAnalysis(for: targetSentence)
+                        },
+                        onSaveWord: { word, source in
+                            saveVocabulary(word, sourceText: source)
+                        },
+                        isWordSaved: { word in
+                            savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
                         }
-                    }
-                    .presentationDetents([.medium, .large])
+                    )
                 }
             }
         }
@@ -319,258 +304,6 @@ struct NewsArticleReaderScreen: View {
                     }
                 }
             }
-        }
-    }
-
-    // MARK: - AI Summary Card
-
-    private func aiSummaryCardView(_ summary: NewsAISummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(AppTheme.Accent.a600)
-                    Text("Tóm tắt ý chính & Từ vựng AI")
-                        .font(.subheadline.bold())
-                        .foregroundStyle(AppTheme.Neutral.n900)
-                }
-
-                Spacer()
-
-                Text("Cấp độ: \(summary.cefrLevel)")
-                    .font(.caption2.bold())
-                    .foregroundStyle(AppTheme.Primary.p700)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(AppTheme.Primary.p100)
-                    .clipShape(Capsule())
-
-                Button {
-                    withAnimation {
-                        showSummaryCard = false
-                    }
-                } label: {
-                    Image(systemName: "chevron.up.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Neutral.n400)
-                }
-            }
-
-            Divider()
-
-            // 3 Takeaways (English + Vietnamese)
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(Array(summary.englishTakeaways.indices), id: \.self) { idx in
-                    let englishText = summary.englishTakeaways[idx]
-                    let sectionID = "takeaway-\(idx)"
-                    let isPickingTakeaway = pickingTarget?.sectionID == sectionID
-                    let activeTakeawayMode = isPickingTakeaway ? pickingTarget?.mode : nil
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let activeMode = activeTakeawayMode {
-                            WordPickerText(
-                                text: englishText,
-                                mode: activeMode,
-                                foregroundStyle: AppTheme.Neutral.n900,
-                                chipBackground: AppTheme.Surface.card,
-                                modeBackground: AppTheme.Accent.a50,
-                                savedWords: savedVocabularyWords,
-                                onPick: { word in
-                                    saveVocabulary(word, sourceText: englishText)
-                                },
-                                onDone: {
-                                    pickingTarget = nil
-                                }
-                            )
-                        } else {
-                            HStack(alignment: .top, spacing: 6) {
-                                Text("•")
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(AppTheme.Primary.p500)
-
-                                Text(englishText)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(AppTheme.Neutral.n900)
-                                    .contextMenu {
-                                        itemContextMenu(text: englishText, sectionID: sectionID)
-                                    }
-                            }
-
-                            // Quick helper action buttons for takeaway
-                            HStack(spacing: 12) {
-                                Button {
-                                    speechManager.toggleSpeak(englishText)
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "speaker.wave.1.fill")
-                                            .font(.system(size: 10))
-                                        Text("Nghe")
-                                            .font(.system(size: 11, weight: .semibold))
-                                    }
-                                    .foregroundStyle(AppTheme.Neutral.n700)
-                                }
-
-                                Button {
-                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                                        pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .pickWord)
-                                    }
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "hand.tap")
-                                            .font(.system(size: 10))
-                                        Text("Pick word")
-                                            .font(.system(size: 11, weight: .semibold))
-                                    }
-                                    .foregroundStyle(AppTheme.Primary.p700)
-                                }
-
-                                Button {
-                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                                        pickingTarget = NewsWordPickTarget(sectionID: sectionID, mode: .lightPickWord)
-                                    }
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "character.book.closed.fill")
-                                            .font(.system(size: 10))
-                                        Text("Light pick")
-                                            .font(.system(size: 11, weight: .semibold))
-                                    }
-                                    .foregroundStyle(AppTheme.Accent.a600)
-                                }
-
-                                Button {
-                                    selectedSentenceForAnalysis = englishText
-                                    showSentenceAnalysisSheet = true
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "text.magnifyingglass")
-                                            .font(.system(size: 10))
-                                        Text("Ngữ pháp")
-                                            .font(.system(size: 11, weight: .semibold))
-                                    }
-                                    .foregroundStyle(AppTheme.Primary.p500)
-                                }
-
-                                Button {
-                                    copyText(englishText)
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "doc.on.doc")
-                                            .font(.system(size: 10))
-                                        Text("Copy")
-                                            .font(.system(size: 11, weight: .semibold))
-                                    }
-                                    .foregroundStyle(AppTheme.Neutral.n500)
-                                }
-
-                                Spacer()
-                            }
-                            .padding(.leading, 14)
-                        }
-
-                        if idx < summary.vietnameseTakeaways.count {
-                            Text(summary.vietnameseTakeaways[idx])
-                                .font(.caption)
-                                .italic()
-                                .foregroundStyle(AppTheme.Neutral.n500)
-                                .padding(.leading, 14)
-                        }
-                    }
-                }
-            }
-
-            // Key vocabulary chips
-            if !summary.keyVocabulary.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Từ vựng trọng tâm trong bài:")
-                        .font(.caption.bold())
-                        .foregroundStyle(AppTheme.Neutral.n700)
-                        .padding(.top, 4)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(summary.keyVocabulary) { vocab in
-                                let isSaved = savedVocabularyWords.contains(vocab.word.normalizedVocabularyWord)
-
-                                Button {
-                                    lookupWordDirectly(vocab.word, contextSentence: vocab.contextExplanation)
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        if isSaved {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .font(.caption2)
-                                                .foregroundStyle(AppTheme.Semantic.success)
-                                        }
-
-                                        Text(vocab.word)
-                                            .font(.caption.bold())
-                                            .foregroundStyle(isSaved ? AppTheme.Semantic.success : AppTheme.Primary.p700)
-                                        Text(vocab.phonetic)
-                                            .font(.system(size: 9))
-                                            .foregroundStyle(AppTheme.Neutral.n500)
-                                        Text("• \(vocab.vietnameseMeaning)")
-                                            .font(.caption2)
-                                            .foregroundStyle(AppTheme.Neutral.n500)
-                                    }
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 5)
-                                    .background(isSaved ? AppTheme.Semantic.success.opacity(0.12) : AppTheme.Primary.p50)
-                                    .clipShape(Capsule())
-                                    .overlay {
-                                        Capsule().strokeBorder(isSaved ? AppTheme.Semantic.success.opacity(0.5) : AppTheme.Primary.p300.opacity(0.5), lineWidth: 0.5)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button {
-                                        speechManager.speak(vocab.word)
-                                    } label: {
-                                        Label("Phát âm", systemImage: "speaker.wave.2")
-                                    }
-
-                                    Button {
-                                        saveVocabulary(vocab.word, sourceText: vocab.contextExplanation)
-                                    } label: {
-                                        Label(isSaved ? "Đã lưu vào Sổ tay" : "Lưu vào Sổ tay", systemImage: isSaved ? "bookmark.fill" : "bookmark")
-                                    }
-
-                                    Button {
-                                        lookupWordDirectly(vocab.word, contextSentence: vocab.contextExplanation)
-                                    } label: {
-                                        Label("Xem chi tiết", systemImage: "character.book.closed.fill")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(AppTheme.Accent.a500.opacity(0.4), lineWidth: 0.5)
-        }
-        .shadow(color: AppTheme.Neutral.n900.opacity(0.04), radius: 6, x: 0, y: 3)
-    }
-
-    private var summaryLoadingView: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .scaleEffect(0.8)
-            Text("AI đang tổng hợp ý chính và từ vựng của bài viết...")
-                .font(.caption)
-                .foregroundStyle(AppTheme.Neutral.n500)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(AppTheme.Neutral.n200, lineWidth: 0.5)
         }
     }
 
@@ -935,30 +668,11 @@ struct NewsArticleReaderScreen: View {
     // MARK: - Actions & Logic
 
     private func loadArticleData() async {
-        // 1. Fetch clean article content
         isLoadingContent = true
         let content = await EnglishNewsService.shared.fetchArticleContent(for: article)
         await MainActor.run {
             self.paragraphs = content
             self.isLoadingContent = false
-        }
-
-        // 2. Fetch AI summary in background
-        isLoadingSummary = true
-        let fullText = content.joined(separator: "\n\n")
-        do {
-            let summary = try await EnglishNewsService.shared.generateAISummary(
-                title: article.title,
-                content: fullText
-            )
-            await MainActor.run {
-                self.aiSummary = summary
-                self.isLoadingSummary = false
-            }
-        } catch {
-            await MainActor.run {
-                self.isLoadingSummary = false
-            }
         }
     }
 
@@ -1112,6 +826,7 @@ struct NewsArticleReaderScreen: View {
     private func openSentenceStructureAnalysis(for sentence: String) {
         stopAudio()
         dismiss()
+        NotificationCenter.default.post(name: .dismissNewsFeed, object: nil)
         StructureNavigationCoordinator.shared.openAndAnalyze(sentence)
     }
 

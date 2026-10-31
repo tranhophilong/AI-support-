@@ -390,6 +390,9 @@ struct ListConversationScreen: View {
             .sheet(isPresented: $showHotNewsFeed) {
                 HotNewsFeedScreen()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .dismissNewsFeed)) { _ in
+                showHotNewsFeed = false
+            }
             .sheet(isPresented: $showVoiceRoleplaySheet) {
                 VoiceRoleplayPickerSheet { scenario in
                     showVoiceRoleplaySheet = false

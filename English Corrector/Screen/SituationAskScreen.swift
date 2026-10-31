@@ -354,6 +354,9 @@ struct SituationAskScreen: View {
             .sheet(isPresented: $showHotNewsFeed) {
                 HotNewsFeedScreen()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .dismissNewsFeed)) { _ in
+                showHotNewsFeed = false
+            }
             .onAppear {
                 if activeSession == nil {
                     activeSession = sessions.first
