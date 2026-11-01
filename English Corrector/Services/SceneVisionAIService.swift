@@ -316,7 +316,7 @@ final class SceneVisionAIService {
         }
         CRITICAL REQUIREMENT:
         \(autoDetectObjects
-          ? "Identify 3 to 6 prominent physical objects clearly visible in the image, pinpointing their exact center point [x, y] (0-100 scale) and box_2d."
+          ? "Identify 3 to 6 distinct, specific physical objects clearly visible in the image (prioritizing individual items such as cups, pens, phones, books, watches, utensils, or accessories over large broad scene containers or whole rooms), pinpointing their exact center point [x, y] (0-100 scale) and box_2d."
           : "Keep 'objectsDetected' as an empty array [] since the user will manually trigger object detection on demand. Focus on providing a vivid sceneOverview and situational conversational phrases.")
         """ + preDetectedBlock
 
@@ -513,11 +513,29 @@ final class SceneVisionAIService {
         return item
     }
 
+    private func prepareCleanCutoutOrCroppedData(from detected: IOSDetectedObjectResult) -> Data {
+        if let cutout = detected.cutoutImage {
+            let size = cutout.size
+            if size.width > 20 && size.height > 20 {
+                let renderer = UIGraphicsImageRenderer(size: size)
+                let composited = renderer.image { ctx in
+                    UIColor.white.setFill()
+                    ctx.fill(CGRect(origin: .zero, size: size))
+                    cutout.draw(in: CGRect(origin: .zero, size: size))
+                }
+                if let data = composited.jpegData(compressionQuality: 0.85) {
+                    return optimizeImageForVision(imageData: data)
+                }
+            }
+        }
+        return optimizeImageForVision(imageData: detected.croppedImageData)
+    }
+
     private func identifyCroppedObjectWithGroq(
         detected: IOSDetectedObjectResult,
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
-        let processedData = optimizeImageForVision(imageData: detected.croppedImageData)
+        let processedData = prepareCleanCutoutOrCroppedData(from: detected)
         let base64String = processedData.base64EncodedString()
         let dataUri = "data:image/jpeg;base64,\(base64String)"
 
@@ -530,8 +548,10 @@ final class SceneVisionAIService {
         The user isolated a specific physical object from their photo (shown in this cropped image).
         \(hintsText)
 
-        Look directly at the center of this cropped image and identify the exact everyday physical object (e.g. 'water bottle', 'ceramic mug', 'laptop keyboard', 'wireless mouse', 'sunglasses', 'ballpoint pen').
-        Be specific, grounded, and accurate. Do not guess obscure or unrelated items.
+        PRECISION TARGETING:
+        - Identify ONLY the specific item targeted at the center of this crop (including small everyday objects like a pen, mug, wristwatch, mouse, eyeglasses, phone, accessory, cutlery, bottle, etc.).
+        - If surrounding items, desk surfaces, or background scenes are partially visible around it, IGNORE all surrounding context and identify strictly the specific targeted object.
+        - Be specific, grounded, and accurate. Do not guess obscure or unrelated items.
         Respond ONLY with a valid JSON object strictly matching this schema:
         {
           "word": "Specific, accurate English name of this object",
@@ -847,7 +867,7 @@ final class SceneVisionAIService {
         detected: IOSDetectedObjectResult,
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
-        let processedData = optimizeImageForVision(imageData: detected.croppedImageData)
+        let processedData = prepareCleanCutoutOrCroppedData(from: detected)
         let base64String = processedData.base64EncodedString()
 
         let hintsText = detected.onDeviceLabels.isEmpty
@@ -859,8 +879,10 @@ final class SceneVisionAIService {
         The user isolated a specific physical object from their photo (shown in this cropped image).
         \(hintsText)
 
-        Look directly at the center of this cropped image and identify the exact everyday physical object (e.g. 'water bottle', 'ceramic mug', 'laptop keyboard', 'wireless mouse', 'sunglasses', 'ballpoint pen').
-        Be specific, grounded, and accurate. Do not guess obscure or unrelated items.
+        PRECISION TARGETING:
+        - Identify ONLY the specific item targeted at the center of this crop (including small everyday objects like a pen, mug, wristwatch, mouse, eyeglasses, phone, accessory, cutlery, bottle, etc.).
+        - If surrounding items, desk surfaces, or background scenes are partially visible around it, IGNORE all surrounding context and identify strictly the specific targeted object.
+        - Be specific, grounded, and accurate. Do not guess obscure or unrelated items.
         Respond ONLY with valid JSON strictly matching this schema:
         {
           "word": "Specific, accurate English noun or noun phrase",
