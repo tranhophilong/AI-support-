@@ -901,6 +901,7 @@ struct InteractiveSceneImageViewerSheet: View {
     @State private var dismissDragOffsetY: CGFloat = 0
 
     // Lasso / Swiping Gesture States for Object Cutoff
+    @State private var isLassoModeEnabled: Bool = false
     @State private var lassoPoints: [CGPoint] = []
     @State private var isDrawingLasso: Bool = false
     @State private var longPressDetectionTask: Task<Void, Never>? = nil
@@ -1021,25 +1022,36 @@ struct InteractiveSceneImageViewerSheet: View {
                         .gesture(
                             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                                 .onChanged { value in
-                                    if lassoPoints.isEmpty {
-                                        lassoPoints.append(value.startLocation)
-                                        longPressDetectionTask?.cancel()
-                                        let startLoc = value.startLocation
-                                        longPressDetectionTask = Task {
-                                            try? await Task.sleep(nanoseconds: 350_000_000)
-                                            guard !Task.isCancelled else { return }
-                                            await MainActor.run {
-                                                if !isDrawingLasso && !hasTriggeredLongPress && !isDetectingObject {
-                                                    hasTriggeredLongPress = true
-                                                    handleLongPress(at: startLoc, in: fittedRect.size)
+                                    guard isLassoModeEnabled else {
+                                        // Normal Mode: Touch & hold handles radar long press detection
+                                        if lassoPoints.isEmpty {
+                                            longPressDetectionTask?.cancel()
+                                            let startLoc = value.startLocation
+                                            longPressDetectionTask = Task {
+                                                try? await Task.sleep(nanoseconds: 350_000_000)
+                                                guard !Task.isCancelled else { return }
+                                                await MainActor.run {
+                                                    if !hasTriggeredLongPress && !isDetectingObject {
+                                                        hasTriggeredLongPress = true
+                                                        handleLongPress(at: startLoc, in: fittedRect.size)
+                                                    }
                                                 }
                                             }
                                         }
+                                        let dist = hypot(value.location.x - value.startLocation.x, value.location.y - value.startLocation.y)
+                                        if dist > 10 {
+                                            longPressDetectionTask?.cancel()
+                                        }
+                                        return
+                                    }
+
+                                    // Lasso Mode: Draw glowing laser line to circle and cut out items
+                                    if lassoPoints.isEmpty {
+                                        lassoPoints.append(value.startLocation)
                                     }
 
                                     let dist = hypot(value.location.x - value.startLocation.x, value.location.y - value.startLocation.y)
-                                    if dist > 8 {
-                                        longPressDetectionTask?.cancel()
+                                    if dist > 6 {
                                         isDrawingLasso = true
                                         lassoPoints.append(value.location)
                                     }
@@ -1049,8 +1061,16 @@ struct InteractiveSceneImageViewerSheet: View {
 
                                     if hasTriggeredLongPress {
                                         hasTriggeredLongPress = false
-                                        lassoPoints = []
-                                        isDrawingLasso = false
+                                        return
+                                    }
+
+                                    guard isLassoModeEnabled else {
+                                        let dist = hypot(value.location.x - value.startLocation.x, value.location.y - value.startLocation.y)
+                                        if dist < 12 {
+                                            withAnimation {
+                                                selectedObject = nil
+                                            }
+                                        }
                                         return
                                     }
 
@@ -1188,18 +1208,18 @@ struct InteractiveSceneImageViewerSheet: View {
                                         ProgressView()
                                             .scaleEffect(0.65)
                                             .tint(.white)
-                                        Text("Đang nhận diện các item...")
+                                        Text("Đang quét...")
                                             .font(.system(size: 11, weight: .bold))
                                     } else {
                                         Image(systemName: "camera.viewfinder")
                                             .font(.system(size: 12, weight: .bold))
                                             .foregroundStyle(AppTheme.Semantic.warning)
-                                        Text("Nhận diện item trong ảnh")
+                                        Text("Quét tất cả")
                                             .font(.system(size: 12, weight: .bold))
                                     }
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 14)
+                                .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
                                 .background(Color.black.opacity(0.85))
                                 .clipShape(Capsule())
@@ -1212,6 +1232,36 @@ struct InteractiveSceneImageViewerSheet: View {
                             .buttonStyle(.plain)
                             .disabled(isScanningAllItems)
 
+                            // Nút bật/tắt chế độ vuốt để detect item
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                    isLassoModeEnabled.toggle()
+                                    if isLassoModeEnabled {
+                                        selectedObject = nil
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: isLassoModeEnabled ? "lasso.badge.sparkles" : "lasso")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(isLassoModeEnabled ? .black : AppTheme.Semantic.warning)
+                                    Text(isLassoModeEnabled ? "Đang vuốt" : "Vuốt khoanh vùng")
+                                        .font(.system(size: 12, weight: .bold))
+                                }
+                                .foregroundStyle(isLassoModeEnabled ? .black : .white)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 7)
+                                .background(isLassoModeEnabled ? AppTheme.Semantic.warning : Color.black.opacity(0.85))
+                                .clipShape(Capsule())
+                                .overlay {
+                                    Capsule()
+                                        .strokeBorder(AppTheme.Semantic.warning, lineWidth: 1)
+                                }
+                                .shadow(color: isLassoModeEnabled ? AppTheme.Semantic.warning.opacity(0.4) : .black.opacity(0.5), radius: 5)
+                            }
+                            .buttonStyle(.plain)
+
                             if !currentScene.objectsDetected.isEmpty {
                                 toggleLabelsButton
                             }
@@ -1220,14 +1270,16 @@ struct InteractiveSceneImageViewerSheet: View {
 
                         if !isScanningAllItems {
                             HStack(spacing: 5) {
-                                Image(systemName: "lasso")
+                                Image(systemName: isLassoModeEnabled ? "lasso.badge.sparkles" : "hand.tap.fill")
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundStyle(AppTheme.Semantic.warning)
-                                Text(scale > 1.05
-                                     ? "1 ngón khoanh đồ vật • 2 ngón để di chuyển & phóng to"
-                                     : (currentScene.objectsDetected.isEmpty
-                                        ? "Vuốt khoanh quanh đồ vật hoặc nhấn đè để AI tách nền nhận diện"
-                                        : "Vuốt khoanh quanh đồ vật bất kỳ để AI nhận diện thêm"))
+                                Text(isLassoModeEnabled
+                                     ? "Chế độ vuốt đang bật: Khoanh vòng quanh đồ vật để tách nền"
+                                     : (scale > 1.05
+                                        ? "Bật 'Vuốt khoanh vùng' để khoanh cắt • 2 ngón để di chuyển"
+                                        : (currentScene.objectsDetected.isEmpty
+                                           ? "Bấm 'Vuốt khoanh vùng' hoặc nhấn đè đồ vật để AI nhận diện"
+                                           : "Bấm 'Vuốt khoanh vùng' để khoanh thêm đồ vật")))
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(Color.white.opacity(0.9))
                             }
@@ -1374,18 +1426,30 @@ struct InteractiveSceneImageViewerSheet: View {
     private func panOrDismissGesture(fittedRect: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
-                guard !isDrawingLasso else { return }
+                guard !isDrawingLasso && !isLassoModeEnabled else { return }
 
-                if scale <= 1.05 {
-                    if value.translation.height > 0 {
-                        dismissDragOffsetY = value.translation.height
-                    }
+                if scale > 1.05 {
+                    offset = CGSize(
+                        width: baseOffset.width + value.translation.width,
+                        height: baseOffset.height + value.translation.height
+                    )
+                } else if value.translation.height > 0 {
+                    dismissDragOffsetY = value.translation.height
                 }
             }
             .onEnded { value in
-                guard !isDrawingLasso else { return }
+                guard !isDrawingLasso && !isLassoModeEnabled else { return }
 
-                if scale <= 1.05 {
+                if scale > 1.05 {
+                    let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
+                    let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
+                    let clampedX = min(maxPanX, max(-maxPanX, offset.width))
+                    let clampedY = min(maxPanY, max(-maxPanY, offset.height))
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        offset = CGSize(width: clampedX, height: clampedY)
+                        baseOffset = offset
+                    }
+                } else if scale <= 1.05 {
                     if value.translation.height > 80 || value.predictedEndTranslation.height > 150 {
                         dismiss()
                     } else {
