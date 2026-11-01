@@ -731,7 +731,7 @@ private struct ConversationTopicTheme {
         ]
         if workKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                icon: "briefcase.fill",
+                icon: "briefcase",
                 tintColor: AppTheme.Neutral.n900
             )
         }
@@ -743,7 +743,7 @@ private struct ConversationTopicTheme {
         ]
         if foodKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                icon: "cup.and.saucer.fill",
+                icon: "cup.and.saucer",
                 tintColor: AppTheme.Neutral.n900
             )
         }
@@ -767,13 +767,13 @@ private struct ConversationTopicTheme {
         ]
         if serviceKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                icon: "bag.fill",
+                icon: "bag",
                 tintColor: AppTheme.Neutral.n900
             )
         }
 
         return ConversationTopicTheme(
-            icon: "bubble.left.and.text.bubble.right.fill",
+            icon: "bubble.left.and.text.bubble.right",
             tintColor: AppTheme.Neutral.n900
         )
     }
@@ -793,29 +793,29 @@ struct AnimatedTopicIconView: View {
                 VStack(spacing: 1.5) {
                     HStack(spacing: 3) {
                         Circle()
-                            .fill(tintColor.opacity(isAnimating ? 0.8 : 0.2))
+                            .stroke(tintColor.opacity(isAnimating ? 0.8 : 0.2), lineWidth: 0.8)
                             .frame(width: 3, height: 3)
                             .offset(y: isAnimating ? -3 : 0)
                         Circle()
-                            .fill(tintColor.opacity(isAnimating ? 0.25 : 0.85))
+                            .stroke(tintColor.opacity(isAnimating ? 0.25 : 0.85), lineWidth: 0.8)
                             .frame(width: 3.5, height: 3.5)
                             .offset(y: isAnimating ? 0 : -3.5)
                         Circle()
-                            .fill(tintColor.opacity(isAnimating ? 0.75 : 0.3))
+                            .stroke(tintColor.opacity(isAnimating ? 0.75 : 0.3), lineWidth: 0.8)
                             .frame(width: 3, height: 3)
                             .offset(y: isAnimating ? -2.5 : 0)
                     }
                     .frame(height: 6)
 
                     Image(systemName: icon)
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(tintColor)
                         .scaleEffect(isAnimating ? 1.06 : 0.95)
                 }
             } else if icon.contains("airplane") {
                 // Travel: Aerodynamic soaring tilt and gentle glide
                 Image(systemName: icon)
-                    .font(.system(size: 23, weight: .bold))
+                    .font(.system(size: 23, weight: .semibold))
                     .foregroundStyle(tintColor)
                     .rotationEffect(.degrees(isAnimating ? 4 : -4))
                     .offset(x: isAnimating ? 1.5 : -1.5, y: isAnimating ? -1.5 : 1.5)
@@ -823,7 +823,7 @@ struct AnimatedTopicIconView: View {
             } else if icon.contains("bag") {
                 // Shopping & Daily Life: Cheerful hanging bag swing & bounce
                 Image(systemName: icon)
-                    .font(.system(size: 23, weight: .bold))
+                    .font(.system(size: 23, weight: .semibold))
                     .foregroundStyle(tintColor)
                     .rotationEffect(.degrees(isAnimating ? 5 : -5), anchor: .top)
                     .scaleEffect(isAnimating ? 1.06 : 0.96)
@@ -831,14 +831,14 @@ struct AnimatedTopicIconView: View {
             } else if icon.contains("briefcase") {
                 // Career / Work: Confident pulse and subtle professional float
                 Image(systemName: icon)
-                    .font(.system(size: 23, weight: .bold))
+                    .font(.system(size: 23, weight: .semibold))
                     .foregroundStyle(tintColor)
                     .scaleEffect(isAnimating ? 1.08 : 0.94)
                     .offset(y: isAnimating ? -1.2 : 1.2)
             } else {
                 // Conversation: Interactive speech bubble conversational bounce
                 Image(systemName: icon)
-                    .font(.system(size: 23, weight: .bold))
+                    .font(.system(size: 23, weight: .semibold))
                     .foregroundStyle(tintColor)
                     .scaleEffect(isAnimating ? 1.10 : 0.94)
                     .rotationEffect(.degrees(isAnimating ? 3 : -3))
@@ -997,7 +997,7 @@ struct ConversationCard: View {
             HStack(alignment: .center, spacing: 8) {
                 if let preview = latestMessagePreview {
                     HStack(spacing: 4) {
-                        Image(systemName: preview.isUser ? "person.fill" : "sparkles")
+                        Image(systemName: preview.isUser ? "person" : "sparkles")
                             .font(.system(size: 10, weight: .bold))
                         Text(preview.senderLabel)
                             .font(.caption2.weight(.bold))
@@ -1017,7 +1017,7 @@ struct ConversationCard: View {
                         .foregroundStyle(AppTheme.Neutral.n900.opacity(0.88))
                         .lineLimit(1)
                 } else {
-                    Image(systemName: "hand.wave.fill")
+                    Image(systemName: "hand.wave")
                         .font(.caption2)
                         .foregroundStyle(AppTheme.Accent.a600)
 
