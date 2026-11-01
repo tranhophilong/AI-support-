@@ -1702,6 +1702,12 @@ struct InteractiveSceneImageViewerSheet: View {
                 .font(.caption.bold())
                 .foregroundStyle(isSelected ? .black : .white)
 
+            if item.isOffline == true {
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(isSelected ? .black : AppTheme.Semantic.warning)
+            }
+
             if isSelected && !item.phonetic.isEmpty {
                 Text(item.phonetic)
                     .font(.system(size: 10))
@@ -1802,6 +1808,20 @@ struct InteractiveSceneImageViewerSheet: View {
                             Text(item.word)
                                 .font(.headline.bold())
                                 .foregroundStyle(.white)
+
+                            if item.isOffline == true {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "wifi.slash")
+                                        .font(.system(size: 8, weight: .bold))
+                                    Text("Offline")
+                                        .font(.system(size: 8, weight: .bold))
+                                }
+                                .foregroundStyle(AppTheme.Semantic.warning)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(AppTheme.Semantic.warning.opacity(0.18))
+                                .clipShape(Capsule())
+                            }
 
                             if !item.phonetic.isEmpty {
                                 Text(item.phonetic)

@@ -167,21 +167,27 @@ final class SceneVisionAIService {
             }
         }
 
-        // 3. Fallback to on-device detected summaries (only if reliable word is found)
+        // 3. Fallback to on-device detected summaries with EverydayVocabularyDictionary (Offline)
         let filtered = summaries.filter { summary in
             let w = summary.word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return !w.isEmpty && w != "item" && w != "object" && w != "vật thể đã chọn"
+            return !w.isEmpty && w != "vật thể đã chọn"
         }
         return filtered.map { summary in
-            AISceneObjectVocabularyItem(
-                word: summary.word.capitalized,
-                phonetic: "",
-                partOfSpeech: "Noun",
-                vietnameseMeaning: "Vật thể trong ảnh",
-                exampleInContext: "",
+            let entry = EverydayVocabularyDictionary.lookup(identifier: summary.word)
+            let word = entry?.word ?? (summary.word.lowercased() == "item" ? "Object" : summary.word.capitalized)
+            let phonetic = entry?.phonetic ?? ""
+            let vietnamese = entry?.vietnamese ?? "Vật thể trong ảnh (Offline)"
+            let pos = entry?.partOfSpeech ?? "Noun"
+            return AISceneObjectVocabularyItem(
+                word: word,
+                phonetic: phonetic,
+                partOfSpeech: pos,
+                vietnameseMeaning: vietnamese,
+                exampleInContext: "Nhận diện tức thì qua Apple Neural Engine [Offline]",
                 xPercent: summary.xPercent,
                 yPercent: summary.yPercent,
-                box2d: summary.box2d
+                box2d: summary.box2d,
+                isOffline: true
             )
         }
     }
@@ -201,13 +207,35 @@ final class SceneVisionAIService {
         }
 
         let geminiKey = APIKeyStore.geminiAPIKey
-        guard !geminiKey.isEmpty else {
-            throw AIServiceError.missingAPIKey(provider: "Groq", keyName: "GROQ_API_KEY")
+        if !geminiKey.isEmpty {
+            do {
+                return try await identifyCroppedObjectWithGemini(
+                    detected: detected,
+                    apiKey: geminiKey
+                )
+            } catch {
+                print("DEBUG: Gemini cropped object analysis failed: \(error). Falling back to on-device offline recognition...")
+            }
         }
 
-        return try await identifyCroppedObjectWithGemini(
-            detected: detected,
-            apiKey: geminiKey
+        // 3. High-Precision On-Device Offline Fallback (Apple Neural Engine + EverydayVocabularyDictionary)
+        let rawLabel = detected.onDeviceLabels.first ?? "item"
+        let entry = EverydayVocabularyDictionary.lookup(identifier: rawLabel)
+        let resolvedWord = entry?.word ?? (rawLabel == "item" ? "Object" : rawLabel.capitalized)
+        let resolvedPhonetic = entry?.phonetic ?? ""
+        let resolvedVietnamese = entry?.vietnamese ?? "Vật thể nhận diện trên thiết bị"
+        let resolvedPos = entry?.partOfSpeech ?? "Noun"
+
+        return AISceneObjectVocabularyItem(
+            word: resolvedWord,
+            phonetic: resolvedPhonetic,
+            partOfSpeech: resolvedPos,
+            vietnameseMeaning: resolvedVietnamese,
+            exampleInContext: "Nhận diện tức thì qua Apple Neural Engine [Offline]",
+            xPercent: Double(detected.refinedCenterPercent.x),
+            yPercent: Double(detected.refinedCenterPercent.y),
+            box2d: detected.box2dGrounding,
+            isOffline: true
         )
     }
 

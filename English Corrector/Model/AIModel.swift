@@ -320,6 +320,7 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
     let xPercent: Double?
     let yPercent: Double?
     let box2d: [Double]?
+    var isOffline: Bool? = false
 
     init(
         word: String,
@@ -329,7 +330,8 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
         exampleInContext: String = "",
         xPercent: Double? = nil,
         yPercent: Double? = nil,
-        box2d: [Double]? = nil
+        box2d: [Double]? = nil,
+        isOffline: Bool? = false
     ) {
         self.word = word
         self.phonetic = phonetic
@@ -339,6 +341,7 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
         self.xPercent = xPercent
         self.yPercent = yPercent
         self.box2d = box2d
+        self.isOffline = isOffline
     }
 
     enum CodingKeys: String, CodingKey {
@@ -360,6 +363,7 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
         case box2dAlt = "box2d"
         case bbox
         case box
+        case isOffline
     }
 
     init(from decoder: Decoder) throws {
@@ -474,6 +478,8 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
             self.xPercent = rawX.map { normalizeCoordinate($0) }
             self.yPercent = rawY.map { normalizeCoordinate($0) }
         }
+
+        self.isOffline = (try? container.decodeIfPresent(Bool.self, forKey: .isOffline)) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -486,6 +492,7 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
         try container.encodeIfPresent(xPercent, forKey: .xPercent)
         try container.encodeIfPresent(yPercent, forKey: .yPercent)
         try container.encodeIfPresent(box2d, forKey: .box2d)
+        try container.encodeIfPresent(isOffline, forKey: .isOffline)
     }
 }
 

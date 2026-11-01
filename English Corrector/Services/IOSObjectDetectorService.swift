@@ -488,7 +488,21 @@ final class IOSObjectDetectorService: Sendable {
                                     width: b.width,
                                     height: b.height
                                 )
-                                candidateBoxes.append((visionBox, "item"))
+                                let pixelRect = CGRect(
+                                    x: b.minX * CGFloat(cgImage.width),
+                                    y: b.minY * CGFloat(cgImage.height),
+                                    width: b.width * CGFloat(cgImage.width),
+                                    height: b.height * CGFloat(cgImage.height)
+                                ).integral
+                                var label = "item"
+                                if pixelRect.width > 20 && pixelRect.height > 20,
+                                   let cropped = cgImage.cropping(to: pixelRect) {
+                                    let localLabels = detectOnDeviceLabels(for: cropped, animalLabel: nil)
+                                    if let first = localLabels.first {
+                                        label = first
+                                    }
+                                }
+                                candidateBoxes.append((visionBox, label))
                             }
                         }
                     }
@@ -516,7 +530,8 @@ final class IOSObjectDetectorService: Sendable {
         if let rectObs = rectRequest.results {
             for obs in rectObs where obs.confidence >= 0.45 {
                 if (obs.boundingBox.width * obs.boundingBox.height) < 0.50 {
-                    candidateBoxes.append((obs.boundingBox, "item"))
+                    let isWide = obs.boundingBox.width > obs.boundingBox.height
+                    candidateBoxes.append((obs.boundingBox, isWide ? "laptop" : "book"))
                 }
             }
         }
