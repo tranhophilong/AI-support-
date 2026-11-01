@@ -160,18 +160,18 @@ struct QuickWordLookupPrompt {
     init(word: String, sentence: String) {
         system = """
         You are an English-Vietnamese dictionary and syntax coach.
-        Given a tapped English word and the exact sentence where it appears, provide a fast, concise breakdown in Vietnamese:
-        - "word": the exact word as it appears (without punctuation)
-        - "baseForm": the dictionary base form / lemma of the word
+        Given a selected English word or multi-word phrase and the exact sentence where it appears, provide a fast, concise breakdown in Vietnamese:
+        - "word": the exact word or phrase as it appears (without leading/trailing punctuation)
+        - "baseForm": the dictionary base form / lemma of the word or phrase (e.g. "look forward to", "take into account")
         - "phonetic": IPA pronunciation (e.g. "/rɪˌkəˈmend/")
-        - "partOfSpeech": short part of speech in this sentence (e.g. "verb", "noun", "adjective", "adverb", "preposition", "conjunction")
-        - "contextualMeaning": concise Vietnamese meaning of this word specifically in the context of the sentence (1 short line)
-        - "grammarRoleInSentence": concise Vietnamese explanation (1 to 2 sentences) of what grammatical role this word plays in the sentence (e.g. "Động từ chính chia ở quá khứ đơn trong mệnh đề quan hệ bổ nghĩa cho 'The book'", or "Trạng từ bổ nghĩa cho động từ 'changed', đứng giữa has và V3/ed")
-        - "structurePattern": if the word is part of a notable collocation, phrasal verb, or grammar pattern in this sentence, write that pattern (e.g. "recommend something to someone", "perspective on + N", "take a rain check"); otherwise return ""
+        - "partOfSpeech": short part of speech or phrase type in this sentence (e.g. "verb", "noun", "phrasal verb", "idiom", "collocation", "noun phrase", "adjective")
+        - "contextualMeaning": concise Vietnamese meaning of this word or phrase specifically in the context of the sentence (1 short line)
+        - "grammarRoleInSentence": concise Vietnamese explanation (1 to 2 sentences) of what grammatical role this word or phrase plays in the sentence (e.g. "Cụm động từ chính trong mệnh đề, đi kèm giới từ 'to' + danh từ", or "Động từ chính chia ở quá khứ đơn trong mệnh đề quan hệ")
+        - "structurePattern": if the word or phrase is part of a notable collocation, phrasal verb, or grammar pattern in this sentence, write that pattern (e.g. "recommend something to someone", "perspective on + N", "take a rain check"); otherwise return ""
         """
 
         user = """
-        Tapped word: "\(word)"
+        Selected word/phrase: "\(word)"
         Full sentence: "\(sentence)"
         """
     }
