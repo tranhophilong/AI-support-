@@ -189,12 +189,71 @@ struct SceneDescriptionCardView: View {
     var onUpdateScene: ((AISceneDescriptionResponse) -> Void)? = nil
     let onSaveWord: ((AISceneObjectVocabularyItem) -> Void)?
     var isWordSaved: ((String) -> Bool)? = nil
+    var messageID: UUID? = nil
+    var pickingTarget: WordPickTarget? = nil
+    var savedWords: Set<String> = []
+    var isHighlightedMessage: Bool = false
+    var highlightedWord: String? = nil
+    var highlightedSourceText: String? = nil
+    var onSaveNote: ((String, Bool, String?) -> Void)? = nil
+    var onCopy: ((String) -> Void)? = nil
+    var onSaveVocabulary: ((String, String) -> Void)? = nil
+    var onStartPickingWords: ((WordPickTarget) -> Void)? = nil
+    var onStopPickingWords: (() -> Void)? = nil
+    var onFollowUp: ((String) -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @State private var showInteractiveViewer = false
     @State private var detailedObjectItem: AISceneObjectVocabularyItem? = nil
 
+    private func isSectionHighlighted(_ sectionText: String) -> Bool {
+        guard isHighlightedMessage else { return false }
+        let trimmedSection = sectionText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmedSection.isEmpty else { return false }
+
+        if let source = highlightedSourceText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !source.isEmpty {
+            if trimmedSection == source || trimmedSection.contains(source) || source.contains(trimmedSection) {
+                return true
+            }
+        }
+
+        if let word = highlightedWord?.normalizedVocabularyWord, !word.isEmpty {
+            return sectionText
+                .split(whereSeparator: \.isWhitespace)
+                .contains { String($0).normalizedVocabularyWord == word }
+        }
+
+        return false
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if isHighlightedMessage {
+                HStack(spacing: 6) {
+                    if let highlightedWord, !highlightedWord.isEmpty {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption2.weight(.bold))
+                        Text("Từ vựng đã lưu: \"\(highlightedWord)\"")
+                            .font(.caption.weight(.bold))
+                    } else {
+                        Image(systemName: "note.text")
+                            .font(.caption2.weight(.bold))
+                        Text("Vị trí ghi chú đã lưu")
+                            .font(.caption.weight(.bold))
+                    }
+                }
+                .foregroundStyle(AppTheme.Accent.a600)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AppTheme.Accent.a50)
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(AppTheme.Accent.a500, lineWidth: 0.5)
+                }
+            }
+
             headerSection
 
             if let imageData, let uiImage = UIImage(data: imageData) {
@@ -202,16 +261,23 @@ struct SceneDescriptionCardView: View {
             }
 
             overviewSection
+
             if !scene.objectsDetected.isEmpty {
                 objectsSection
             } else if imageData != nil {
                 detectItemsQuickButton
             }
+
             if !scene.situationalConversationalPhrases.isEmpty {
                 phrasesSection
             }
+
             if let note = scene.adviceOrCulturalNote, !note.isEmpty {
                 adviceSection(note)
+            }
+
+            if let onFollowUp {
+                quickFollowUpSection(onFollowUp: onFollowUp)
             }
         }
         .padding(14)
@@ -349,30 +415,109 @@ struct SceneDescriptionCardView: View {
     }
 
     private var overviewSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 8) {
-                Text(scene.sceneOverview)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.Neutral.n900)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        let baseTarget = messageID.map { WordPickTarget(messageID: $0, section: "scene-overview") }
+        let isHighlighted = isSectionHighlighted(scene.sceneOverview)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Label("Mô tả cảnh vật", systemImage: "sparkles")
+                    .font(.caption.bold())
+                    .foregroundStyle(AppTheme.Primary.p500)
+
+                Spacer()
 
                 SpeakButton(
                     text: scene.sceneOverview,
                     font: .caption,
                     activeColor: AppTheme.Primary.p500
                 )
+
+                if let onSaveNote {
+                    Button {
+                        onSaveNote(scene.sceneOverview, false, scene.sceneVietnameseTranslation)
+                    } label: {
+                        Image(systemName: "plus.square.on.square")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Neutral.n500)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let onFollowUp {
+                    Button {
+                        onFollowUp("Giải thích chi tiết hơn về bức ảnh và mô tả này: \"\(scene.sceneOverview)\"")
+                    } label: {
+                        Image(systemName: "arrowshape.turn.up.left")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Primary.p500)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
-            Text(scene.sceneVietnameseTranslation)
-                .font(.caption)
-                .foregroundStyle(AppTheme.Neutral.n700)
+            Group {
+                if let activeTarget = pickingTarget, let base = baseTarget, activeTarget.matchesSection(base) {
+                    WordPickerText(
+                        text: scene.sceneOverview,
+                        mode: activeTarget.mode,
+                        foregroundStyle: AppTheme.Neutral.n900,
+                        chipBackground: AppTheme.Surface.card,
+                        modeBackground: AppTheme.Accent.a50,
+                        savedWords: savedWords,
+                        onPick: { word in
+                            onSaveVocabulary?(word, scene.sceneOverview)
+                        },
+                        onDone: {
+                            onStopPickingWords?()
+                        }
+                    )
+                } else {
+                    vocabularyHighlightedText(
+                        scene.sceneOverview,
+                        targetWord: highlightedWord,
+                        defaultColor: AppTheme.Neutral.n900
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .messageActions(
+                        speakText: scene.sceneOverview,
+                        onCopy: {
+                            onCopy?(scene.sceneOverview)
+                        },
+                        onPickWords: {
+                            if let messageID {
+                                onStartPickingWords?(WordPickTarget(messageID: messageID, section: "scene-overview", mode: .pickWord))
+                            }
+                        },
+                        onLightPickWords: {
+                            if let messageID {
+                                onStartPickingWords?(WordPickTarget(messageID: messageID, section: "scene-overview", mode: .lightPickWord))
+                            }
+                        },
+                        onFollowUp: {
+                            onFollowUp?(scene.sceneOverview)
+                        },
+                        onDelete: onDelete
+                    )
+                }
+            }
+
+            if !scene.sceneVietnameseTranslation.isEmpty {
+                Text(scene.sceneVietnameseTranslation)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Neutral.n700)
+            }
         }
         .padding(12)
         .background(AppTheme.Primary.p50.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(AppTheme.Primary.p300, lineWidth: 0.5)
+                .strokeBorder(
+                    isHighlighted ? AppTheme.Accent.a500 : AppTheme.Primary.p300,
+                    lineWidth: isHighlighted ? 1.5 : 0.5
+                )
         }
     }
 
@@ -496,6 +641,35 @@ struct SceneDescriptionCardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
         }
+        .contextMenu {
+            Button {
+                detailedObjectItem = item
+            } label: {
+                Label("Xem chi tiết", systemImage: "magnifyingglass")
+            }
+
+            Button {
+                onCopy?(item.word)
+            } label: {
+                Label("Sao chép từ", systemImage: "doc.on.doc")
+            }
+
+            if !item.exampleInContext.isEmpty {
+                Button {
+                    StructureNavigationCoordinator.shared.openAndAnalyze(item.exampleInContext)
+                } label: {
+                    Label("Phân tích câu ví dụ", systemImage: "rectangle.3.group.fill")
+                }
+            }
+
+            if let onFollowUp {
+                Button {
+                    onFollowUp("Giải thích thêm về từ '\(item.word)' và cách dùng trong ngữ cảnh ảnh này.")
+                } label: {
+                    Label("Hỏi thêm AI về từ này", systemImage: "arrowshape.turn.up.left")
+                }
+            }
+        }
     }
 
     private var phrasesSection: some View {
@@ -505,26 +679,105 @@ struct SceneDescriptionCardView: View {
                 .foregroundStyle(AppTheme.Primary.p500)
                 .textCase(.uppercase)
 
-            VStack(spacing: 6) {
-                ForEach(scene.situationalConversationalPhrases, id: \.self) { phrase in
-                    HStack(spacing: 8) {
-                        Text(phrase)
-                            .font(.subheadline)
-                            .foregroundStyle(AppTheme.Neutral.n900)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 8) {
+                ForEach(Array(scene.situationalConversationalPhrases.enumerated()), id: \.offset) { index, phrase in
+                    let baseTarget = messageID.map { WordPickTarget(messageID: $0, section: "scene-phrase-\(index)") }
+                    let isHighlighted = isSectionHighlighted(phrase)
 
-                        SpeakButton(
-                            text: phrase,
-                            font: .caption,
-                            activeColor: AppTheme.Primary.p500
-                        )
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("Cách nói \(index + 1)")
+                                .font(.caption2.bold())
+                                .foregroundStyle(AppTheme.Primary.p500)
+
+                            Spacer()
+
+                            SpeakButton(
+                                text: phrase,
+                                font: .caption,
+                                activeColor: AppTheme.Primary.p500
+                            )
+
+                            if let onSaveNote {
+                                Button {
+                                    onSaveNote(phrase, false, "Mẫu câu giao tiếp theo ngữ cảnh ảnh")
+                                } label: {
+                                    Image(systemName: "plus.square.on.square")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.Neutral.n500)
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            if let onFollowUp {
+                                Button {
+                                    onFollowUp("Giải thích cách dùng và tình huống thực tế của câu: \"\(phrase)\"")
+                                } label: {
+                                    Image(systemName: "arrowshape.turn.up.left")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.Primary.p500)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        Group {
+                            if let activeTarget = pickingTarget, let base = baseTarget, activeTarget.matchesSection(base) {
+                                WordPickerText(
+                                    text: phrase,
+                                    mode: activeTarget.mode,
+                                    foregroundStyle: AppTheme.Neutral.n900,
+                                    chipBackground: AppTheme.Surface.card,
+                                    modeBackground: AppTheme.Accent.a50,
+                                    savedWords: savedWords,
+                                    onPick: { word in
+                                        onSaveVocabulary?(word, phrase)
+                                    },
+                                    onDone: {
+                                        onStopPickingWords?()
+                                    }
+                                )
+                            } else {
+                                vocabularyHighlightedText(
+                                    phrase,
+                                    targetWord: highlightedWord,
+                                    defaultColor: AppTheme.Neutral.n900
+                                )
+                                .font(.subheadline)
+                                .lineLimit(nil)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .messageActions(
+                                    speakText: phrase,
+                                    onCopy: {
+                                        onCopy?(phrase)
+                                    },
+                                    onPickWords: {
+                                        if let messageID {
+                                            onStartPickingWords?(WordPickTarget(messageID: messageID, section: "scene-phrase-\(index)", mode: .pickWord))
+                                        }
+                                    },
+                                    onLightPickWords: {
+                                        if let messageID {
+                                            onStartPickingWords?(WordPickTarget(messageID: messageID, section: "scene-phrase-\(index)", mode: .lightPickWord))
+                                        }
+                                    },
+                                    onFollowUp: {
+                                        onFollowUp?(phrase)
+                                    },
+                                    onDelete: onDelete
+                                )
+                            }
+                        }
                     }
                     .padding(10)
                     .background(AppTheme.Secondary.s50)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay {
                         RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+                            .strokeBorder(
+                                isHighlighted ? AppTheme.Accent.a500 : AppTheme.Surface.border,
+                                lineWidth: isHighlighted ? 1.5 : 0.5
+                            )
                     }
                 }
             }
@@ -542,6 +795,21 @@ struct SceneDescriptionCardView: View {
                 .font(.caption)
                 .foregroundStyle(AppTheme.Neutral.n700)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contextMenu {
+                    Button {
+                        UIPasteboard.general.string = note
+                    } label: {
+                        Label("Sao chép lời khuyên", systemImage: "doc.on.doc")
+                    }
+
+                    if let onFollowUp {
+                        Button {
+                            onFollowUp("Giải thích thêm về lưu ý văn hóa này: \"\(note)\"")
+                        } label: {
+                            Label("Hỏi thêm AI", systemImage: "arrowshape.turn.up.left")
+                        }
+                    }
+                }
         }
         .padding(10)
         .background(AppTheme.Accent.a50)
@@ -549,6 +817,52 @@ struct SceneDescriptionCardView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(AppTheme.Accent.a500.opacity(0.3), lineWidth: 0.5)
+        }
+    }
+
+    private func quickFollowUpSection(onFollowUp: @escaping (String) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Gợi ý hỏi tiếp AI:", systemImage: "sparkles")
+                .font(.caption2.bold())
+                .foregroundStyle(AppTheme.Neutral.n500)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button {
+                        onFollowUp("Gợi ý thêm 3 câu giao tiếp tự nhiên về hoàn cảnh trong ảnh này.")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.bubble.fill")
+                                .font(.caption2)
+                            Text("Gợi ý thêm câu nói")
+                                .font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(AppTheme.Primary.p500)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.Primary.p50)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        onFollowUp("Dịch và phân tích các cấu trúc ngữ pháp dùng trong mô tả ảnh này.")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "character.book.closed.fill")
+                                .font(.caption2)
+                            Text("Phân tích ngữ pháp mô tả")
+                                .font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(AppTheme.Accent.a600)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.Accent.a50)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 }

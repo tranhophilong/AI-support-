@@ -427,20 +427,32 @@ struct SituationAskScreen: View {
                 },
                 isWordSaved: { word in
                     savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                },
+                messageID: item.id,
+                pickingTarget: pickingTarget,
+                savedWords: savedVocabularyWords,
+                onSaveNote: { english, _, nuance in
+                    saveExpressionToNotedAI(english: english, nuance: nuance ?? "")
+                },
+                onCopy: { text in
+                    copyText(text)
+                },
+                onSaveVocabulary: { word, source in
+                    saveVocabulary(word, sourceText: source)
+                },
+                onStartPickingWords: { target in
+                    pickingTarget = target
+                },
+                onStopPickingWords: {
+                    pickingTarget = nil
+                },
+                onFollowUp: { text in
+                    sendQuestion(text)
+                },
+                onDelete: {
+                    deleteMessage(item)
                 }
             )
-            .contextMenu {
-                Button(action: {
-                    copyText(scene.sceneOverview)
-                }) {
-                    Label("Sao chép mô tả", systemImage: "doc.on.doc")
-                }
-                Button(role: .destructive, action: {
-                    deleteMessage(item)
-                }) {
-                    Label("Xoá", systemImage: "trash")
-                }
-            }
         } else if let response = item.decodedResponse {
             SituationAIBubble(
                 messageID: item.id,

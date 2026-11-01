@@ -273,20 +273,42 @@ struct ChatScreen: View {
                                                 },
                                                 isWordSaved: { word in
                                                     savedVocabularyWords.contains(word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                                                },
+                                                messageID: item.id,
+                                                pickingTarget: pickingTarget,
+                                                savedWords: savedVocabularyWords,
+                                                isHighlightedMessage: isHighlightedMsg,
+                                                highlightedWord: activeHighlightWord,
+                                                highlightedSourceText: activeHighlightSource,
+                                                onSaveNote: { noteText, isExplanation, noted in
+                                                    saveNote(
+                                                        text: noteText,
+                                                        originalText: "Ảnh chụp tình huống",
+                                                        context: scene.sceneOverview,
+                                                        isExplanation: isExplanation,
+                                                        explanationNoted: noted,
+                                                        sourceMessageID: item.id
+                                                    )
+                                                },
+                                                onCopy: { text in
+                                                    copyText(text)
+                                                },
+                                                onSaveVocabulary: { word, source in
+                                                    saveVocabulary(word, sourceText: source, showToast: pickingTarget == nil)
+                                                },
+                                                onStartPickingWords: { target in
+                                                    pickingTarget = target
+                                                },
+                                                onStopPickingWords: {
+                                                    pickingTarget = nil
+                                                },
+                                                onFollowUp: { text in
+                                                    followUp(with: text)
+                                                },
+                                                onDelete: {
+                                                    deleteMessage(item)
                                                 }
                                             )
-                                            .contextMenu {
-                                                Button(action: {
-                                                    copyText(scene.sceneOverview)
-                                                }) {
-                                                    Label("Sao chép mô tả", systemImage: "doc.on.doc")
-                                                }
-                                                Button(role: .destructive, action: {
-                                                    deleteMessage(item)
-                                                }) {
-                                                    Label("Xoá", systemImage: "trash")
-                                                }
-                                            }
                                         } else {
                                             StarterAIBubble(
                                                 messageID: item.id,
