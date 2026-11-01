@@ -686,6 +686,29 @@ struct SituationAskScreen: View {
                         .foregroundStyle(AppTheme.Semantic.error)
 
                     Spacer()
+
+                    if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            inputText = ""
+                            speechRecognizer.startRecording(
+                                existingText: "",
+                                onUpdate: { updatedText in
+                                    inputText = updatedText
+                                },
+                                onError: { errorText in
+                                    errorMessage = errorText
+                                }
+                            )
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.counterclockwise")
+                                Text("Xoá nói lại")
+                            }
+                            .font(.caption2.bold())
+                            .foregroundStyle(AppTheme.Semantic.error)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .padding(.horizontal, 4)
             }
@@ -725,14 +748,38 @@ struct SituationAskScreen: View {
                         .ignoresSafeArea()
                 }
 
-                TextField(
-                    speechRecognizer.isRecording
-                    ? "Đang nghe..."
-                    : (selectedAttachedImage != nil ? "Nhập câu hỏi về ảnh (không bắt buộc)..." : "Mô tả hoàn cảnh hoặc câu muốn nói bằng tiếng Anh..."),
-                    text: $inputText,
-                    axis: .vertical
-                )
-                .lineLimit(1...5)
+                HStack(spacing: 6) {
+                    TextField(
+                        speechRecognizer.isRecording
+                        ? "Đang nghe..."
+                        : (selectedAttachedImage != nil ? "Nhập câu hỏi về ảnh (không bắt buộc)..." : "Mô tả hoàn cảnh hoặc câu muốn nói bằng tiếng Anh..."),
+                        text: $inputText,
+                        axis: .vertical
+                    )
+                    .lineLimit(1...5)
+
+                    if !inputText.isEmpty {
+                        Button {
+                            inputText = ""
+                            if speechRecognizer.isRecording {
+                                speechRecognizer.startRecording(
+                                    existingText: "",
+                                    onUpdate: { updatedText in
+                                        inputText = updatedText
+                                    },
+                                    onError: { errorText in
+                                        errorMessage = errorText
+                                    }
+                                )
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.Neutral.n400)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                 .padding(12)
                 .background(AppTheme.Surface.card)
                 .clipShape(RoundedRectangle(cornerRadius: 18))

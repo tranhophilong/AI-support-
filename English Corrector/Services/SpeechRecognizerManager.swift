@@ -17,6 +17,7 @@ final class SpeechRecognizerManager: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var activeSessionID = UUID()
 
     func startRecording(
         existingText: String,
@@ -24,10 +25,12 @@ final class SpeechRecognizerManager: ObservableObject {
         onError: @escaping (String) -> Void
     ) {
         stopRecording()
+        let requestedSessionID = UUID()
+        activeSessionID = requestedSessionID
 
         SFSpeechRecognizer.requestAuthorization { [weak self] authStatus in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.activeSessionID == requestedSessionID else { return }
 
                 guard authStatus == .authorized else {
                     onError("Please allow Speech Recognition in Settings")
@@ -35,12 +38,14 @@ final class SpeechRecognizerManager: ObservableObject {
                 }
 
                 let micAllowed = await AVAudioApplication.requestRecordPermission()
+                guard self.activeSessionID == requestedSessionID else { return }
                 guard micAllowed else {
                     onError("Please allow Microphone access in Settings")
                     return
                 }
 
                 self.beginSession(
+                    sessionID: requestedSessionID,
                     existingText: existingText,
                     onUpdate: onUpdate,
                     onError: onError
@@ -50,6 +55,9 @@ final class SpeechRecognizerManager: ObservableObject {
     }
 
     func stopRecording() {
+        // Invalidate active session ID first so any pending final callbacks from SFSpeechRecognizer are ignored
+        activeSessionID = UUID()
+
         if let engine = audioEngine {
             if engine.isRunning {
                 engine.stop()
@@ -71,6 +79,7 @@ final class SpeechRecognizerManager: ObservableObject {
     }
 
     private func beginSession(
+        sessionID: UUID,
         existingText: String,
         onUpdate: @escaping (String) -> Void,
         onError: @escaping (String) -> Void
@@ -107,7 +116,7 @@ final class SpeechRecognizerManager: ObservableObject {
 
             self.recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.isRecording, self.activeSessionID == sessionID else { return }
 
                     if let result {
                         let spoken = result.bestTranscription.formattedString

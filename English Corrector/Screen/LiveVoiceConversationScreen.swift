@@ -198,6 +198,7 @@ struct LiveVoiceConversationScreen: View {
     @State private var isSendingToAI = false
     @State private var isBlindSubtitleRevealed = false
     @State private var showCorrectionDetails = false
+    @State private var isLastSpokenTurnCleared = true
     @State private var showHints = true
 
     @State private var aiVietnameseTranslation: String?
@@ -261,7 +262,9 @@ struct LiveVoiceConversationScreen: View {
         } else if isAISpeakingNow {
             return "AI Coach đang nói..."
         } else if speechRecognizer.isRecording {
-            return isHandsFreeMode ? "Đang nghe (tự gửi khi ngừng nói)..." : "Đang nghe bạn nói..."
+            return hasLiveTranscriptText ? "Đang nghe • Bấm Gửi hoặc Xoá nói lại" : "Đang nghe bạn nói..."
+        } else if hasLiveTranscriptText {
+            return "Đã nói xong • Bấm Gửi hoặc Xoá nói lại"
         } else {
             return "Sẵn sàng lắng nghe"
         }
@@ -302,8 +305,36 @@ struct LiveVoiceConversationScreen: View {
                         aiSpokenSubtitleCard
 
                         // 3. USER LAST TURN & GENTLE CORRECTION CARD
-                        if let latestUser = latestUserMessage {
+                        // Cleared automatically when AI responds with a new question
+                        if let latestUser = latestUserMessage, !isLastSpokenTurnCleared {
                             userLastTurnCorrectionCard(userMsg: latestUser, aiMsg: latestAIMessage)
+                        } else if let latestUser = latestUserMessage,
+                                  let latestAI = latestAIMessage,
+                                  latestAI.createdAt >= latestUser.createdAt,
+                                  !speechRecognizer.isRecording,
+                                  !hasLiveTranscriptText {
+                            HStack {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        isLastSpokenTurnCleared = false
+                                    }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "sparkles")
+                                            .font(.caption2.bold())
+                                        Text("Xem góp ý câu vừa trả lời")
+                                            .font(.caption.bold())
+                                    }
+                                    .foregroundStyle(AppTheme.Primary.p500)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(AppTheme.Primary.p50)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+
+                                Spacer()
+                            }
                         }
 
                         // 4. HINTS / SUGGESTED REPLIES
@@ -345,6 +376,10 @@ struct LiveVoiceConversationScreen: View {
             stopAllAudioAndTimers()
         }
         .onChange(of: currentAISpokenLine) { _, newLine in
+            silenceTimerTask?.cancel()
+            liveTranscript = ""
+            isLastSpokenTurnCleared = true
+            showCorrectionDetails = false
             isBlindSubtitleRevealed = false
             aiVietnameseTranslation = nil
             if subtitleMode == .bilingual {
@@ -597,6 +632,17 @@ struct LiveVoiceConversationScreen: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isLastSpokenTurnCleared = true
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Neutral.n400)
+                }
+                .buttonStyle(.plain)
             }
 
             Text("\"\(userMsg.text)\"")
@@ -781,47 +827,82 @@ struct LiveVoiceConversationScreen: View {
 
     // MARK: - Bottom Call Control Area
 
+    private var hasLiveTranscriptText: Bool {
+        !liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var bottomCallControlArea: some View {
         VStack(spacing: 12) {
             // Live spoken transcript preview / editable field
-            if speechRecognizer.isRecording || !liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(spacing: 6) {
+            if speechRecognizer.isRecording || hasLiveTranscriptText {
+                VStack(spacing: 8) {
                     HStack(spacing: 8) {
-                        Image(systemName: "waveform")
+                        Image(systemName: speechRecognizer.isRecording ? "waveform" : "text.bubble.fill")
                             .font(.caption.bold())
                             .foregroundStyle(speechRecognizer.isRecording ? AppTheme.Semantic.success : AppTheme.Primary.p500)
 
                         TextField("Đang nghe bạn nói tiếng Anh...", text: $liveTranscript, axis: .vertical)
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1...3)
-
-                        if !liveTranscript.isEmpty {
-                            Button {
-                                silenceTimerTask?.cancel()
-                                liveTranscript = ""
-                                if speechRecognizer.isRecording {
-                                    startListeningSession()
-                                }
-                            } label: {
-                                Image(systemName: "arrow.counterclockwise.circle.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(AppTheme.Neutral.n400)
-                            }
-                            .buttonStyle(.plain)
-                        }
                     }
 
-                    if speechRecognizer.isRecording {
-                        GradientWaveRibbonCanvas(
-                            colors: [
-                                AppTheme.Semantic.success,
-                                AppTheme.Primary.p500,
-                                AppTheme.Accent.a500
-                            ],
-                            isActive: true,
-                            amplitudeMultiplier: 0.55
-                        )
-                        .frame(height: 18)
+                    HStack(spacing: 10) {
+                        if speechRecognizer.isRecording {
+                            GradientWaveRibbonCanvas(
+                                colors: [
+                                    AppTheme.Semantic.success,
+                                    AppTheme.Primary.p500,
+                                    AppTheme.Accent.a500
+                                ],
+                                isActive: true,
+                                amplitudeMultiplier: 0.55
+                            )
+                            .frame(height: 18)
+                        } else {
+                            Text("Đã nói xong • Bạn có thể gửi hoặc xoá để nói lại")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Neutral.n500)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                        }
+
+                        if hasLiveTranscriptText {
+                            // Nút Xoá đi để nói lại
+                            Button {
+                                clearTranscriptAndRespeak()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.counterclockwise")
+                                    Text("Xoá nói lại")
+                                }
+                                .font(.caption.bold())
+                                .foregroundStyle(AppTheme.Semantic.error)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(AppTheme.Semantic.error.opacity(0.12))
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            // Nút Submit gửi câu vừa nói
+                            Button {
+                                let textToSend = liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                                sendSpokenTurn(textToSend)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("Gửi")
+                                    Image(systemName: "arrow.up.circle.fill")
+                                }
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(AppTheme.Semantic.success)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSendingToAI)
+                        }
                     }
                 }
                 .padding(.horizontal, 14)
@@ -877,22 +958,22 @@ struct LiveVoiceConversationScreen: View {
                     ZStack {
                         Circle()
                             .fill(
-                                speechRecognizer.isRecording
+                                (speechRecognizer.isRecording || hasLiveTranscriptText)
                                 ? AppTheme.Semantic.success
                                 : AppTheme.Primary.p500
                             )
                             .frame(width: 72, height: 72)
                             .shadow(
-                                color: (speechRecognizer.isRecording ? AppTheme.Semantic.success : AppTheme.Primary.p500).opacity(0.35),
+                                color: ((speechRecognizer.isRecording || hasLiveTranscriptText) ? AppTheme.Semantic.success : AppTheme.Primary.p500).opacity(0.35),
                                 radius: 14,
                                 x: 0,
                                 y: 6
                             )
 
                         Image(
-                            systemName: speechRecognizer.isRecording
-                            ? (!liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "arrow.up" : "stop.fill")
-                            : "mic.fill"
+                            systemName: hasLiveTranscriptText
+                            ? "arrow.up"
+                            : (speechRecognizer.isRecording ? "stop.fill" : "mic.fill")
                         )
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.white)
@@ -1062,36 +1143,31 @@ struct LiveVoiceConversationScreen: View {
         }
     }
 
+    private func clearTranscriptAndRespeak() {
+        silenceTimerTask?.cancel()
+        if speechRecognizer.isRecording {
+            speechRecognizer.stopRecording()
+        }
+        liveTranscript = ""
+        startListeningSession()
+    }
+
     private func startListeningSession() {
         guard !isSendingToAI else { return }
         tts.stop()
         silenceTimerTask?.cancel()
         liveTranscript = ""
+        isLastSpokenTurnCleared = true
 
         speechRecognizer.startRecording(
             existingText: "",
             onUpdate: { updatedText in
                 liveTranscript = updatedText
-                if isHandsFreeMode {
-                    scheduleAutoSendAfterSilence()
-                }
             },
             onError: { err in
                 showStatusToast(err)
             }
         )
-    }
-
-    private func scheduleAutoSendAfterSilence() {
-        silenceTimerTask?.cancel()
-        silenceTimerTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_850_000_000)
-            guard !Task.isCancelled else { return }
-            let trimmed = liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard speechRecognizer.isRecording, !trimmed.isEmpty, !isSendingToAI else { return }
-            speechRecognizer.stopRecording()
-            sendSpokenTurn(trimmed)
-        }
     }
 
     private func speakCurrentAITurn(autoListenAfter: Bool) {
@@ -1120,6 +1196,7 @@ struct LiveVoiceConversationScreen: View {
         tts.stop()
 
         liveTranscript = ""
+        isLastSpokenTurnCleared = false
         isSendingToAI = true
 
         // 1. Save user message to ConversationModel
@@ -1190,6 +1267,10 @@ struct LiveVoiceConversationScreen: View {
                     context.insert(aiMessage)
                     try? context.save()
 
+                    // Clear spoken sentence when AI responds with a new question
+                    liveTranscript = ""
+                    isLastSpokenTurnCleared = true
+                    showCorrectionDetails = false
                     isSendingToAI = false
                     speakCurrentAITurn(autoListenAfter: isHandsFreeMode)
                 }

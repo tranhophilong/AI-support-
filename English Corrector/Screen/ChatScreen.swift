@@ -776,6 +776,29 @@ struct ChatScreen: View {
                         .foregroundStyle(AppTheme.Semantic.error)
 
                     Spacer()
+
+                    if !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            message = ""
+                            speechRecognizer.startRecording(
+                                existingText: "",
+                                onUpdate: { updatedText in
+                                    message = updatedText
+                                },
+                                onError: { errorText in
+                                    showStatusMessage(errorText)
+                                }
+                            )
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.counterclockwise")
+                                Text("Xoá nói lại")
+                            }
+                            .font(.caption2.bold())
+                            .foregroundStyle(AppTheme.Semantic.error)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .padding(.horizontal, 4)
                 .transition(.opacity)
@@ -816,12 +839,36 @@ struct ChatScreen: View {
                         .ignoresSafeArea()
                 }
 
-                TextField(
-                    speechRecognizer.isRecording ? "Speaking..." : (selectedAttachedImage != nil ? "Ask about this photo..." : "Write naturally..."),
-                    text: $message,
-                    axis: .vertical
-                )
-                .lineLimit(1...5)
+                HStack(spacing: 6) {
+                    TextField(
+                        speechRecognizer.isRecording ? "Speaking..." : (selectedAttachedImage != nil ? "Ask about this photo..." : "Write naturally..."),
+                        text: $message,
+                        axis: .vertical
+                    )
+                    .lineLimit(1...5)
+
+                    if !message.isEmpty {
+                        Button {
+                            message = ""
+                            if speechRecognizer.isRecording {
+                                speechRecognizer.startRecording(
+                                    existingText: "",
+                                    onUpdate: { updatedText in
+                                        message = updatedText
+                                    },
+                                    onError: { errorText in
+                                        showStatusMessage(errorText)
+                                    }
+                                )
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.Neutral.n400)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                 .padding(12)
                 .background(AppTheme.Surface.card)
                 .clipShape(RoundedRectangle(cornerRadius: 18))
