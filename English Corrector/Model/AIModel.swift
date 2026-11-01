@@ -311,7 +311,8 @@ struct MistakeCategoryReminderConfig: Codable, Equatable, Hashable {
 // MARK: - AI Scene & Camera Vision Description
 
 struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
-    var id: String { "\(word)-\(vietnameseMeaning)-\(xPercent ?? 0)-\(yPercent ?? 0)" }
+    var id: String { internalId }
+    private let internalId: String
     let word: String
     let phonetic: String
     let partOfSpeech: String
@@ -331,8 +332,10 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
         xPercent: Double? = nil,
         yPercent: Double? = nil,
         box2d: [Double]? = nil,
-        isOffline: Bool? = false
+        isOffline: Bool? = false,
+        internalId: String = UUID().uuidString
     ) {
+        self.internalId = internalId
         self.word = word
         self.phonetic = phonetic
         self.partOfSpeech = partOfSpeech
@@ -367,6 +370,8 @@ struct AISceneObjectVocabularyItem: Codable, Equatable, Hashable, Identifiable {
     }
 
     init(from decoder: Decoder) throws {
+        self.internalId = UUID().uuidString
+
         if let singleValue = try? decoder.singleValueContainer(),
            let stringWord = try? singleValue.decode(String.self) {
             self.word = stringWord

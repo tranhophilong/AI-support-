@@ -68,18 +68,18 @@ final class SceneVisionAIService {
     private let session: URLSession
 
     // Multi-tier Fallback Vision Models Chain
-    // 1. Groq Qwen (27B) -> 2. Groq Llama 3.2 (11B) -> 3. Groq Llama 3.2 (90B)
+    // 1. Groq Qwen (27B)
     private let groqVisionModels: [String] = [
-        "qwen/qwen3.8-27b",
-        "meta-llama/llama-3.2-11b-vision-preview",
-        "meta-llama/llama-3.2-90b-vision-preview"
+        "qwen/qwen3.8-27b"
     ]
 
-    // 4. Gemini 2.5 Flash -> 5. Gemini 2.0 Flash -> 6. Gemini 1.5 Flash
+    // 2. Gemini Multimodal Models (Active current API endpoints)
     private let geminiVisionModels: [String] = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-flash-latest",
+        "gemini-3.1-flash-lite"
     ]
 
     init(
@@ -768,7 +768,7 @@ final class SceneVisionAIService {
         userPrompt: String?,
         preDetected: [IOSDetectedObjectSummary] = [],
         autoDetectObjects: Bool = false,
-        modelName: String = "gemini-2.5-flash",
+        modelName: String = "gemini-3.8-flash",
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
@@ -873,7 +873,7 @@ final class SceneVisionAIService {
         imageData: Data,
         xPercent: Double,
         yPercent: Double,
-        modelName: String = "gemini-2.5-flash",
+        modelName: String = "gemini-3.8-flash",
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
         let processedData = optimizeImageForVision(imageData: imageData)
@@ -978,7 +978,7 @@ final class SceneVisionAIService {
 
     private func identifyCroppedObjectWithGemini(
         detected: IOSDetectedObjectResult,
-        modelName: String = "gemini-2.5-flash",
+        modelName: String = "gemini-3.8-flash",
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
         let processedData = prepareCleanCutoutOrCroppedData(from: detected)

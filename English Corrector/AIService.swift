@@ -52,10 +52,10 @@ final class AIService {
         } catch {
             print("DEBUG: Primary provider \(provider.name) improveEnglish failed: \(error). Trying backup providers...")
 
-            // 1. If Groq failed, try fallback Groq model llama-3.3-70b-versatile
+            // 1. If Groq failed, try alternative Groq model openai/gpt-oss-120b
             if provider.name == "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
                 do {
-                    return try await GroqAIProvider(model: "llama-3.3-70b-versatile").improveEnglish(
+                    return try await GroqAIProvider(model: "openai/gpt-oss-120b").improveEnglish(
                         userInput: userInput,
                         context: context,
                         recentHistory: recentHistory
@@ -65,9 +65,9 @@ final class AIService {
                 }
             }
 
-            // 2. Try Gemini backup models
+            // 2. Try Gemini backup models (Current active API models)
             if !APIKeyStore.geminiAPIKey.isEmpty {
-                let geminiFallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+                let geminiFallbackModels = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"]
                 for gemModel in geminiFallbackModels {
                     do {
                         return try await GeminiAIProvider(model: gemModel).improveEnglish(
@@ -84,7 +84,7 @@ final class AIService {
             // 3. If primary was Gemini and Groq has key, try Groq as backup
             if provider.name != "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
                 do {
-                    return try await GroqAIProvider(model: "llama-3.3-70b-versatile").improveEnglish(
+                    return try await GroqAIProvider(model: "openai/gpt-oss-20b").improveEnglish(
                         userInput: userInput,
                         context: context,
                         recentHistory: recentHistory
@@ -111,7 +111,7 @@ final class AIService {
             )
         } catch {
             if provider.name == "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
-                if let res = try? await GroqAIProvider(model: "llama-3.3-70b-versatile").suggestNextWords(
+                if let res = try? await GroqAIProvider(model: "openai/gpt-oss-120b").suggestNextWords(
                     currentInput: currentInput,
                     context: context,
                     lastQuestion: lastQuestion
@@ -120,7 +120,7 @@ final class AIService {
                 }
             }
             if !APIKeyStore.geminiAPIKey.isEmpty {
-                for gemModel in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] {
+                for gemModel in ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"] {
                     if let res = try? await GeminiAIProvider(model: gemModel).suggestNextWords(
                         currentInput: currentInput,
                         context: context,
@@ -141,12 +141,12 @@ final class AIService {
             return try await provider.summarizeUserMistakes(samples: samples)
         } catch {
             if provider.name == "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
-                if let res = try? await GroqAIProvider(model: "llama-3.3-70b-versatile").summarizeUserMistakes(samples: samples) {
+                if let res = try? await GroqAIProvider(model: "openai/gpt-oss-120b").summarizeUserMistakes(samples: samples) {
                     return res
                 }
             }
             if !APIKeyStore.geminiAPIKey.isEmpty {
-                for gemModel in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] {
+                for gemModel in ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"] {
                     if let res = try? await GeminiAIProvider(model: gemModel).summarizeUserMistakes(samples: samples) {
                         return res
                     }
@@ -204,7 +204,7 @@ enum AIModelOption: String, CaseIterable, Identifiable {
         case .groqGPTOSS120B:
             return "openai/gpt-oss-120b"
         case .geminiFlash:
-            return "gemini-3.6-flash"
+            return "gemini-3.8-flash"
         }
     }
 
@@ -303,7 +303,7 @@ final class GeminiAIProvider: EnglishCorrectionAIProvider {
 
     init(
         apiKey: String = APIKeyStore.geminiAPIKey,
-        model: String = "gemini-3.6-flash",
+        model: String = "gemini-3.8-flash",
         session: URLSession = .shared
     ) {
         self.apiKey = apiKey
