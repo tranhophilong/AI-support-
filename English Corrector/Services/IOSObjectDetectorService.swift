@@ -23,11 +23,14 @@ struct IOSDetectedObjectResult: Sendable {
     let croppedImageData: Data
 
     /// Refined center point (0...100%) in UIKit coordinates (top-left is 0,0)
-    /// This snaps the target pin directly onto the true center of the object
+    /// Snapped directly to the true center (tâm) of the cutoff object
     let refinedCenterPercent: CGPoint
 
-    /// Bounding box (0...100%) in UIKit coordinates (x, y, width, height)
+    /// Bounding box (0...100%) in UIKit coordinates (x, y, width, height) of the detected subject
     let boundingBoxPercent: CGRect
+
+    /// Bounding box with context padding (0...100%) matching croppedImage and cutoutImage dimensions
+    let paddedBoxPercent: CGRect
 
     /// Visual grounding bounding box formatted as [ymin, xmin, ymax, xmax] (0...100%)
     var box2dGrounding: [Double] {
@@ -47,6 +50,14 @@ struct IOSDetectedObjectResult: Sendable {
 
     /// Whether Apple Vision detected a distinct physical object (true) or used smart focus crop (false)
     let isObjectMatched: Bool
+}
+
+/// Metrics describing the geometry and center of mass of a cutoff object
+struct CutoutMetrics: Sendable {
+    /// Weighted center of mass of the non-transparent cutout pixels in normalized 0...1 space (0,0 is top-left)
+    let center: CGPoint
+    /// Tight bounding box around non-transparent cutout pixels in normalized 0...1 space (0,0 is top-left)
+    let bounds: CGRect
 }
 
 /// Lightweight summary of an object detected on-device
@@ -222,24 +233,50 @@ final class IOSObjectDetectorService: Sendable {
         let contourLoops = extractContourLoops(for: croppedCG)
 
         // 9. Extract Foreground Subject Cutout (Subject Lifting / background removal)
-        let cutoutImage = extractForegroundCutout(for: croppedCG)
+        let (cutoutImage, cutoutMetrics) = extractForegroundCutout(for: croppedCG)
 
         // 10. Local Classification: only return reliable, non-generic labels (confidence >= 0.55)
         let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: detectedAnimalLabel)
 
-        let boundingBoxPercent = CGRect(
-            x: uiBox.origin.x * 100.0,
-            y: uiBox.origin.y * 100.0,
-            width: uiBox.size.width * 100.0,
-            height: uiBox.size.height * 100.0
+        let paddedBoxPercent = CGRect(
+            x: paddedBox.origin.x * 100.0,
+            y: paddedBox.origin.y * 100.0,
+            width: paddedBox.size.width * 100.0,
+            height: paddedBox.size.height * 100.0
         )
+
+        let finalCenterPercent: CGPoint
+        let finalBoundingBoxPercent: CGRect
+
+        if let metrics = cutoutMetrics {
+            // Lấy điểm dot chính xác tại TÂM (trọng tâm) của vùng đã cutoff
+            finalCenterPercent = CGPoint(
+                x: max(2.0, min(98.0, (paddedBox.minX + metrics.center.x * paddedBox.width) * 100.0)),
+                y: max(2.0, min(98.0, (paddedBox.minY + metrics.center.y * paddedBox.height) * 100.0))
+            )
+            finalBoundingBoxPercent = CGRect(
+                x: (paddedBox.minX + metrics.bounds.minX * paddedBox.width) * 100.0,
+                y: (paddedBox.minY + metrics.bounds.minY * paddedBox.height) * 100.0,
+                width: max(2.0, metrics.bounds.width * paddedBox.width * 100.0),
+                height: max(2.0, metrics.bounds.height * paddedBox.height * 100.0)
+            )
+        } else {
+            finalCenterPercent = refinedCenterPercent
+            finalBoundingBoxPercent = CGRect(
+                x: uiBox.origin.x * 100.0,
+                y: uiBox.origin.y * 100.0,
+                width: uiBox.size.width * 100.0,
+                height: uiBox.size.height * 100.0
+            )
+        }
 
         return IOSDetectedObjectResult(
             croppedImage: croppedUIImage,
             cutoutImage: cutoutImage,
             croppedImageData: jpegData,
-            refinedCenterPercent: refinedCenterPercent,
-            boundingBoxPercent: boundingBoxPercent,
+            refinedCenterPercent: finalCenterPercent,
+            boundingBoxPercent: finalBoundingBoxPercent,
+            paddedBoxPercent: paddedBoxPercent,
             contourLoops: contourLoops,
             onDeviceLabels: onDeviceLabels,
             isObjectMatched: isObjectMatched
@@ -365,7 +402,8 @@ final class IOSObjectDetectorService: Sendable {
     }
 
     /// Separates the subject from the background using Apple Foreground Instance Masking (iOS 17+)
-    private func extractForegroundCutout(for cgImage: CGImage) -> UIImage? {
+    /// and extracts geometric metrics (center of mass and tight bounding box) of the cutoff subject.
+    private func extractForegroundCutout(for cgImage: CGImage) -> (image: UIImage?, metrics: CutoutMetrics?) {
         if #available(iOS 17.0, *) {
             let maskRequest = VNGenerateForegroundInstanceMaskRequest()
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
@@ -377,16 +415,86 @@ final class IOSObjectDetectorService: Sendable {
                     from: handler,
                     croppedToInstancesExtent: false
                   ) else {
-                return nil
+                return (nil, nil)
             }
 
             let ciImage = CIImage(cvPixelBuffer: maskedBuffer)
             let ciContext = CIContext(options: nil)
             if let outputCG = ciContext.createCGImage(ciImage, from: ciImage.extent) {
-                return UIImage(cgImage: outputCG)
+                let metrics = computeCutoutMetrics(from: outputCG)
+                return (UIImage(cgImage: outputCG), metrics)
             }
         }
-        return nil
+        return (nil, nil)
+    }
+
+    /// Computes the true center of mass (tâm) and tight bounding box of the non-transparent pixels in the cutoff image.
+    private func computeCutoutMetrics(from cgImage: CGImage) -> CutoutMetrics? {
+        let width = 128
+        let height = 128
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        // Flip context vertically so pixel row 0 corresponds to top of the image (UIKit standard)
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1.0, y: -1.0)
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width
+        var maxX = 0
+        var minY = height
+        var maxY = 0
+        var sumX: Double = 0
+        var sumY: Double = 0
+        var totalWeight: Double = 0
+
+        for y in 0..<height {
+            let rowStart = y * width * 4
+            for x in 0..<width {
+                let offset = rowStart + (x * 4)
+                let alpha = pixels[offset + 3]
+                if alpha > 30 {
+                    let w = Double(alpha)
+                    sumX += Double(x) * w
+                    sumY += Double(y) * w
+                    totalWeight += w
+
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                }
+            }
+        }
+
+        guard totalWeight > 0, minX <= maxX, minY <= maxY else { return nil }
+
+        let center = CGPoint(
+            x: (sumX / totalWeight) / Double(width),
+            y: (sumY / totalWeight) / Double(height)
+        )
+        let normMinX = CGFloat(minX) / CGFloat(width)
+        let normMaxX = CGFloat(maxX + 1) / CGFloat(width)
+        let normMinY = CGFloat(minY) / CGFloat(height)
+        let normMaxY = CGFloat(maxY + 1) / CGFloat(height)
+
+        let bounds = CGRect(
+            x: normMinX,
+            y: normMinY,
+            width: max(0.01, normMaxX - normMinX),
+            height: max(0.01, normMaxY - normMinY)
+        )
+
+        return CutoutMetrics(center: center, bounds: bounds)
     }
 
     // MARK: - Local Classification

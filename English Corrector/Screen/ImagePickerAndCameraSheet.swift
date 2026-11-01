@@ -1145,7 +1145,7 @@ struct InteractiveSceneImageViewerSheet: View {
 
                 // 2. Animate Laser Contour Border & Lift Cutout (NO PRELIMINARY DUMMY TAG CREATED)
                 await MainActor.run {
-                    let box = detected.boundingBoxPercent
+                    let box = detected.paddedBoxPercent
                     let rect = CGRect(
                         x: (box.origin.x / 100.0) * imageSize.width,
                         y: (box.origin.y / 100.0) * imageSize.height,
