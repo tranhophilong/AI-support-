@@ -1195,153 +1195,118 @@ struct InteractiveSceneImageViewerSheet: View {
                 .position(x: fittedRect.midX, y: fittedRect.midY)
                 .scaleEffect(scale)
                 .offset(offset)
-
-                // Action Banner: Button "Nhận diện item trong ảnh" & Helper Hint
-                if !isDetectingObject {
-                    VStack(spacing: 8) {
-                        HStack(spacing: 8) {
-                            Button {
-                                detectAllItems()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if isScanningAllItems {
-                                        ProgressView()
-                                            .scaleEffect(0.65)
-                                            .tint(.white)
-                                        Text("Đang quét...")
-                                            .font(.system(size: 11, weight: .bold))
-                                    } else {
-                                        Image(systemName: "camera.viewfinder")
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundStyle(AppTheme.Semantic.warning)
-                                        Text("Quét tất cả")
-                                            .font(.system(size: 12, weight: .bold))
-                                    }
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Color.black.opacity(0.85))
-                                .clipShape(Capsule())
-                                .overlay {
-                                    Capsule()
-                                        .strokeBorder(AppTheme.Semantic.warning.opacity(0.85), lineWidth: 1)
-                                }
-                                .shadow(color: .black.opacity(0.5), radius: 5)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isScanningAllItems)
-
-                            // Nút bật/tắt chế độ vuốt để detect item
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                                    isLassoModeEnabled.toggle()
-                                    if isLassoModeEnabled {
-                                        selectedObject = nil
-                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: isLassoModeEnabled ? "lasso.badge.sparkles" : "lasso")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(isLassoModeEnabled ? .black : AppTheme.Semantic.warning)
-                                    Text(isLassoModeEnabled ? "Đang vuốt" : "Vuốt khoanh vùng")
-                                        .font(.system(size: 12, weight: .bold))
-                                }
-                                .foregroundStyle(isLassoModeEnabled ? .black : .white)
-                                .padding(.horizontal, 13)
-                                .padding(.vertical, 7)
-                                .background(isLassoModeEnabled ? AppTheme.Semantic.warning : Color.black.opacity(0.85))
-                                .clipShape(Capsule())
-                                .overlay {
-                                    Capsule()
-                                        .strokeBorder(AppTheme.Semantic.warning, lineWidth: 1)
-                                }
-                                .shadow(color: isLassoModeEnabled ? AppTheme.Semantic.warning.opacity(0.4) : .black.opacity(0.5), radius: 5)
-                            }
-                            .buttonStyle(.plain)
-
-                            if !currentScene.objectsDetected.isEmpty {
-                                toggleLabelsButton
-                            }
-                        }
-                        .padding(.top, 10)
-
-                        if !isScanningAllItems {
-                            HStack(spacing: 5) {
-                                Image(systemName: isLassoModeEnabled ? "lasso.badge.sparkles" : "hand.tap.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(AppTheme.Semantic.warning)
-                                Text(isLassoModeEnabled
-                                     ? "Chế độ vuốt đang bật: Khoanh vòng quanh đồ vật để tách nền"
-                                     : (scale > 1.05
-                                        ? "Bật 'Vuốt khoanh vùng' để khoanh cắt • 2 ngón để di chuyển"
-                                        : (currentScene.objectsDetected.isEmpty
-                                           ? "Bấm 'Vuốt khoanh vùng' hoặc nhấn đè đồ vật để AI nhận diện"
-                                           : "Bấm 'Vuốt khoanh vùng' để khoanh thêm đồ vật")))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.9))
-                            }
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 5)
-                            .background(Color.black.opacity(0.75))
-                            .clipShape(Capsule())
-                        }
-
-                        Spacer()
-                    }
-                }
-
-
-                // Quick Reset Zoom Indicator Badge
-                if scale > 1.05 {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            zoomResetBadge
-                        }
-                        Spacer()
-                    }
-                    .padding(14)
-                }
             }
             .contentShape(Rectangle())
-            .overlay {
-                TwoFingerPanView(
-                    isEnabled: scale > 1.05,
-                    onBegan: {
-                        lassoPoints = []
-                        isDrawingLasso = false
-                        longPressDetectionTask?.cancel()
-                        hasTriggeredLongPress = false
-                    },
-                    onChanged: { translation in
-                        let newX = baseOffset.width + translation.width
-                        let newY = baseOffset.height + translation.height
-                        let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
-                        let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
-                        offset = CGSize(
-                            width: min(maxPanX, max(-maxPanX, newX)),
-                            height: min(maxPanY, max(-maxPanY, newY))
-                        )
-                    },
-                    onEnded: { _ in
-                        let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
-                        let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
-                        let clampedX = min(maxPanX, max(-maxPanX, offset.width))
-                        let clampedY = min(maxPanY, max(-maxPanY, offset.height))
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            offset = CGSize(width: clampedX, height: clampedY)
-                            baseOffset = offset
-                        }
-                    }
-                )
-                .allowsHitTesting(scale > 1.05)
-            }
             .simultaneousGesture(doubleTapGesture)
             .simultaneousGesture(magnificationGesture)
             .simultaneousGesture(panOrDismissGesture(fittedRect: fittedRect))
+            .overlay(alignment: .top) {
+                if !isDetectingObject {
+                    actionBannerOverlay
+                        .zIndex(100)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if scale > 1.05 {
+                    zoomResetBadge
+                        .padding(14)
+                        .zIndex(101)
+                }
+            }
+        }
+    }
+
+    private var actionBannerOverlay: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    detectAllItems()
+                } label: {
+                    HStack(spacing: 6) {
+                        if isScanningAllItems {
+                            ProgressView()
+                                .scaleEffect(0.65)
+                                .tint(.white)
+                            Text("Đang quét...")
+                                .font(.system(size: 11, weight: .bold))
+                        } else {
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(AppTheme.Semantic.warning)
+                            Text("Quét tất cả")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.85))
+                    .clipShape(Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(AppTheme.Semantic.warning.opacity(0.85), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.5), radius: 5)
+                }
+                .buttonStyle(.plain)
+                .disabled(isScanningAllItems)
+
+                // Nút bật/tắt chế độ vuốt để detect item
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        isLassoModeEnabled.toggle()
+                        if isLassoModeEnabled {
+                            selectedObject = nil
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isLassoModeEnabled ? "lasso.badge.sparkles" : "lasso")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(isLassoModeEnabled ? .black : AppTheme.Semantic.warning)
+                        Text(isLassoModeEnabled ? "Đang vuốt" : "Vuốt khoanh vùng")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundStyle(isLassoModeEnabled ? .black : .white)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 7)
+                    .background(isLassoModeEnabled ? AppTheme.Semantic.warning : Color.black.opacity(0.85))
+                    .clipShape(Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(AppTheme.Semantic.warning, lineWidth: 1)
+                    }
+                    .shadow(color: isLassoModeEnabled ? AppTheme.Semantic.warning.opacity(0.4) : .black.opacity(0.5), radius: 5)
+                }
+                .buttonStyle(.plain)
+
+                if !currentScene.objectsDetected.isEmpty {
+                    toggleLabelsButton
+                }
+            }
+            .padding(.top, 10)
+
+            if !isScanningAllItems {
+                HStack(spacing: 5) {
+                    Image(systemName: isLassoModeEnabled ? "lasso.badge.sparkles" : "hand.tap.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(AppTheme.Semantic.warning)
+                    Text(isLassoModeEnabled
+                         ? "Chế độ vuốt đang bật: Khoanh vòng quanh đồ vật để tách nền"
+                         : (scale > 1.05
+                            ? "Kéo 1 ngón để di chuyển ảnh • Bấm 'Vuốt khoanh vùng' để cắt đồ vật"
+                            : (currentScene.objectsDetected.isEmpty
+                               ? "Bấm 'Vuốt khoanh vùng' hoặc nhấn đè đồ vật để AI nhận diện"
+                               : "Bấm 'Vuốt khoanh vùng' để khoanh thêm đồ vật")))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.9))
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.75))
+                .clipShape(Capsule())
+            }
         }
     }
 
@@ -2670,85 +2635,4 @@ private struct LassoPathOverlay: View {
     }
 }
 
-// MARK: - 2-Finger Pan & Pinch Recognizer
 
-private struct TwoFingerPanView: UIViewRepresentable {
-    var isEnabled: Bool
-    var onBegan: () -> Void
-    var onChanged: (CGSize) -> Void
-    var onEnded: (CGSize) -> Void
-
-    func makeUIView(context: Context) -> UIView {
-        let view = TouchForwardingView()
-        view.backgroundColor = .clear
-
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        pan.minimumNumberOfTouches = 2
-        pan.maximumNumberOfTouches = 2
-        pan.cancelsTouchesInView = false
-        pan.delaysTouchesBegan = false
-        pan.delegate = context.coordinator
-        view.addGestureRecognizer(pan)
-
-        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
-        pinch.cancelsTouchesInView = false
-        pinch.delaysTouchesBegan = false
-        pinch.delegate = context.coordinator
-        view.addGestureRecognizer(pinch)
-
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.parent = self
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: TwoFingerPanView
-
-        init(parent: TwoFingerPanView) {
-            self.parent = parent
-        }
-
-        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
-            if recognizer.state == .began {
-                parent.onBegan()
-            }
-        }
-
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard parent.isEnabled else { return }
-            let translation = recognizer.translation(in: recognizer.view)
-            let size = CGSize(width: translation.x, height: translation.y)
-
-            switch recognizer.state {
-            case .began:
-                parent.onBegan()
-            case .changed:
-                parent.onChanged(size)
-            case .ended, .cancelled:
-                parent.onEnded(size)
-            default:
-                break
-            }
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            return true
-        }
-    }
-}
-
-private class TouchForwardingView: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        return hit
-    }
-}
