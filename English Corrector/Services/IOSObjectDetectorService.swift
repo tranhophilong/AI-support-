@@ -3,6 +3,7 @@
 //  English Corrector
 //
 //  Created by Antigravity on 2026-10-31.
+//  Reference: Apple Vision Framework - Detecting Objects in Still Images
 //
 
 import UIKit
@@ -41,11 +42,11 @@ struct IOSDetectedObjectResult: Sendable {
     /// Detected curved and rounded border contour loops of the object in normalized 0...1 Vision space
     let contourLoops: [[CGPoint]]
 
-    /// On-device classification keywords detected by Apple Vision Neural Engine (e.g. ["mug", "coffee cup"])
+    /// Confident on-device classification keywords (confidence >= 0.55), empty if uncertain
     let onDeviceLabels: [String]
 
     /// Whether Apple Vision detected a distinct physical object (true) or used smart focus crop (false)
-    let isSaliencyMatched: Bool
+    let isObjectMatched: Bool
 }
 
 /// Lightweight summary of an object detected on-device
@@ -61,7 +62,17 @@ final class IOSObjectDetectorService: Sendable {
 
     private init() {}
 
-    /// Detects the object at (xPercent, yPercent), refines its center, and crops the object using Apple Vision.
+    // Generic taxonomy words that do NOT represent specific physical everyday objects
+    private static let genericTaxonomyBlacklist: Set<String> = [
+        "artifact", "room", "indoor", "outdoor", "object", "device", "goods",
+        "structure", "material", "equipment", "instrument", "furnishing",
+        "tableware", "container", "consumer goods", "commodity", "entity",
+        "mammal", "animal", "vertebrate", "invertebrate", "living thing",
+        "part", "feature", "surface", "background", "foreground", "scene",
+        "decoration", "decoration item", "item", "holding", "covering"
+    ]
+
+    /// Detects the specific physical object at (xPercent, yPercent) in accordance with Apple's Vision Object Detection guidelines.
     func detectAndCropObject(
         from image: UIImage,
         atXPercent xPercent: Double,
@@ -79,58 +90,74 @@ final class IOSObjectDetectorService: Sendable {
             throw AIServiceError.apiError(provider: "Vision", message: "Kích thước ảnh không hợp lệ")
         }
 
-        // 2. Convert UIKit coordinates (0...100, origin top-left) to normalized (0...1)
+        // 2. Convert UIKit coordinates (0...100, origin top-left) to normalized Vision coordinates (0...1, origin bottom-left)
         let clampedX = max(0.01, min(0.99, xPercent / 100.0))
         let clampedY = max(0.01, min(0.99, yPercent / 100.0))
-
-        // Vision framework uses lower-left as (0,0)
         let visionPoint = CGPoint(x: clampedX, y: 1.0 - clampedY)
 
-        // 3. Run Apple Vision Objectness Saliency Request
+        // 3. Multi-request pipeline: Rectangle detection + Animal recognition + Saliency objectness
+        let rectRequest = VNDetectRectanglesRequest()
+        rectRequest.minimumConfidence = 0.45
+        rectRequest.minimumSize = 0.05
+
+        let animalRequest = VNRecognizeAnimalsRequest()
         let saliencyRequest = VNGenerateObjectnessBasedSaliencyImageRequest()
+
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        try? handler.perform([rectRequest, animalRequest, saliencyRequest])
 
-        try? handler.perform([saliencyRequest])
+        // 4. Collect candidate bounding boxes that strictly contain visionPoint
+        var candidateBoxes: [CGRect] = []
+        var detectedAnimalLabel: String? = nil
 
-        var matchedVisionBox: CGRect? = nil
-        var isSaliencyMatched = false
-
-        if let observation = saliencyRequest.results?.first,
-           let salientObjects = observation.salientObjects,
-           !salientObjects.isEmpty {
-
-            // Step A: Check if any salient object bounding box directly encloses visionPoint
-            let containingBoxes = salientObjects
-                .map(\.boundingBox)
-                .filter { $0.contains(visionPoint) }
-
-            if let mostSpecific = containingBoxes.min(by: { ($0.width * $0.height) < ($1.width * $1.height) }) {
-                matchedVisionBox = mostSpecific
-                isSaliencyMatched = true
-            } else {
-                // Step B: Find the closest salient object within a 22% proximity threshold
-                let closest = salientObjects.compactMap { obj -> (CGRect, CGFloat)? in
-                    let box = obj.boundingBox
-                    let centerX = box.midX
-                    let centerY = box.midY
-                    let dx = centerX - visionPoint.x
-                    let dy = centerY - visionPoint.y
-                    let dist = sqrt(dx * dx + dy * dy)
-                    return (dist <= 0.22) ? (box, dist) : nil
-                }.min(by: { $0.1 < $1.1 })
-
-                if let closestBox = closest?.0 {
-                    matchedVisionBox = closestBox
-                    isSaliencyMatched = true
+        // A. Animals (e.g. Dog, Cat)
+        if let animalObs = animalRequest.results {
+            for obs in animalObs where obs.confidence >= 0.60 {
+                let box = obs.boundingBox
+                if box.contains(visionPoint) {
+                    candidateBoxes.append(box)
+                    if let topLabel = obs.labels.first(where: { $0.confidence >= 0.60 }) {
+                        detectedAnimalLabel = topLabel.identifier.capitalized
+                    }
                 }
             }
         }
 
-        // 4. Resolve UIKit normalized bounding box & center
+        // B. Rectangular objects (phones, monitors, books, cards, papers, boxes, keyboards)
+        if let rectObs = rectRequest.results {
+            for obs in rectObs where obs.confidence >= 0.45 {
+                let box = obs.boundingBox
+                if box.contains(visionPoint) && (box.width * box.height) < 0.70 {
+                    candidateBoxes.append(box)
+                }
+            }
+        }
+
+        // C. Salient object regions (only if strictly containing visionPoint and not covering whole scene)
+        if let saliencyObs = saliencyRequest.results?.first,
+           let salientObjects = saliencyObs.salientObjects {
+            for obj in salientObjects {
+                let box = obj.boundingBox
+                if box.contains(visionPoint) && (box.width * box.height) < 0.65 {
+                    candidateBoxes.append(box)
+                }
+            }
+        }
+
+        var matchedVisionBox: CGRect? = nil
+        var isObjectMatched = false
+
+        // Pick the most specific (smallest area) box that directly contains the touched point
+        if let mostSpecific = candidateBoxes.min(by: { ($0.width * $0.height) < ($1.width * $1.height) }) {
+            matchedVisionBox = mostSpecific
+            isObjectMatched = true
+        }
+
+        // 5. Resolve UIKit bounding box & refined center
         let uiBox: CGRect
         let refinedCenterPercent: CGPoint
 
-        if let vBox = matchedVisionBox, isSaliencyMatched {
+        if let vBox = matchedVisionBox, isObjectMatched {
             // Convert Vision (bottom-left) to UIKit (top-left)
             let uiX = vBox.origin.x
             let uiY = 1.0 - (vBox.origin.y + vBox.size.height)
@@ -145,12 +172,13 @@ final class IOSObjectDetectorService: Sendable {
             )
 
             refinedCenterPercent = CGPoint(
-                x: max(2.0, min(98.0, (uiBox.midX) * 100.0)),
-                y: max(2.0, min(98.0, (uiBox.midY) * 100.0))
+                x: max(2.0, min(98.0, uiBox.midX * 100.0)),
+                y: max(2.0, min(98.0, uiBox.midY * 100.0))
             )
         } else {
-            // Fallback: Smart adaptive square focus window centered at touch point
-            let focusDimension: CGFloat = 0.28
+            // Fallback: localized focus window centered DIRECTLY on the user's touch point.
+            // NEVER snap to a distant object!
+            let focusDimension: CGFloat = 0.26
             let originX = max(0.0, min(1.0 - focusDimension, clampedX - focusDimension / 2.0))
             let originY = max(0.0, min(1.0 - focusDimension, clampedY - focusDimension / 2.0))
             uiBox = CGRect(x: originX, y: originY, width: focusDimension, height: focusDimension)
@@ -158,9 +186,9 @@ final class IOSObjectDetectorService: Sendable {
             refinedCenterPercent = CGPoint(x: xPercent, y: yPercent)
         }
 
-        // 5. Expand bounding box by 12% padding for visual surrounding context
-        let padX = uiBox.width * 0.12
-        let padY = uiBox.height * 0.12
+        // 6. Expand bounding box by 10% padding for context
+        let padX = uiBox.width * 0.10
+        let padY = uiBox.height * 0.10
         let paddedMinX = max(0.0, uiBox.minX - padX)
         let paddedMinY = max(0.0, uiBox.minY - padY)
         let paddedMaxX = min(1.0, uiBox.maxX + padX)
@@ -173,7 +201,7 @@ final class IOSObjectDetectorService: Sendable {
             height: max(0.05, paddedMaxY - paddedMinY)
         )
 
-        // 6. Crop CGImage with pixel precision
+        // 7. Crop CGImage with pixel precision
         let pixelRect = CGRect(
             x: paddedBox.origin.x * imageWidth,
             y: paddedBox.origin.y * imageHeight,
@@ -190,14 +218,14 @@ final class IOSObjectDetectorService: Sendable {
             throw AIServiceError.apiError(provider: "Vision", message: "Lỗi nén ảnh vật thể")
         }
 
-        // 7. Extract Object Curves & Contours via Apple Vision Contour Detection
+        // 8. Extract Object Curves & Contours via Apple Vision Contour Detection
         let contourLoops = extractContourLoops(for: croppedCG)
 
-        // 8. Extract Foreground Subject Cutout (Subject Lifting / background removal)
+        // 9. Extract Foreground Subject Cutout (Subject Lifting / background removal)
         let cutoutImage = extractForegroundCutout(for: croppedCG)
 
-        // 9. Fast On-Device Classification (runs in <15ms on Neural Engine)
-        let onDeviceLabels = detectOnDeviceLabels(for: croppedCG)
+        // 10. Local Classification: only return reliable, non-generic labels (confidence >= 0.55)
+        let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: detectedAnimalLabel)
 
         let boundingBoxPercent = CGRect(
             x: uiBox.origin.x * 100.0,
@@ -214,28 +242,69 @@ final class IOSObjectDetectorService: Sendable {
             boundingBoxPercent: boundingBoxPercent,
             contourLoops: contourLoops,
             onDeviceLabels: onDeviceLabels,
-            isSaliencyMatched: isSaliencyMatched
+            isObjectMatched: isObjectMatched
         )
     }
 
-    /// Scans the full image with Apple Vision Neural Engine to pre-detect physical objects and their exact coordinates before sending to AI
+    /// Scans the full image with Apple Vision to pre-detect physical objects and their visual coordinates.
     func scanAllObjectsInImage(from image: UIImage) -> [IOSDetectedObjectSummary] {
         let normalizedImage = normalizeImageOrientation(image)
         guard let cgImage = normalizedImage.cgImage else { return [] }
 
         let saliencyRequest = VNGenerateObjectnessBasedSaliencyImageRequest()
+        let rectRequest = VNDetectRectanglesRequest()
+        rectRequest.minimumConfidence = 0.5
+        rectRequest.minimumSize = 0.08
+        let animalRequest = VNRecognizeAnimalsRequest()
+
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
-        guard (try? handler.perform([saliencyRequest])) != nil,
-              let observation = saliencyRequest.results?.first,
-              let salientObjects = observation.salientObjects else {
+        guard (try? handler.perform([saliencyRequest, rectRequest, animalRequest])) != nil else {
             return []
         }
 
-        var summaries: [IOSDetectedObjectSummary] = []
-        let sortedObjects = salientObjects.prefix(6)
+        var candidateBoxes: [(box: CGRect, label: String)] = []
 
-        for obj in sortedObjects {
-            let vBox = obj.boundingBox
+        if let animalObs = animalRequest.results {
+            for obs in animalObs where obs.confidence >= 0.65 {
+                let name = obs.labels.first?.identifier.capitalized ?? "Pet"
+                candidateBoxes.append((obs.boundingBox, name))
+            }
+        }
+
+        if let rectObs = rectRequest.results {
+            for obs in rectObs where obs.confidence >= 0.55 {
+                if (obs.boundingBox.width * obs.boundingBox.height) < 0.65 {
+                    candidateBoxes.append((obs.boundingBox, "item"))
+                }
+            }
+        }
+
+        if let saliencyObs = saliencyRequest.results?.first,
+           let salientObjects = saliencyObs.salientObjects {
+            for obj in salientObjects {
+                let b = obj.boundingBox
+                if b.width >= 0.05 && b.height >= 0.05 && (b.width * b.height) < 0.65 {
+                    candidateBoxes.append((b, "item"))
+                }
+            }
+        }
+
+        // Deduplicate overlapping boxes
+        var uniqueBoxes: [(box: CGRect, label: String)] = []
+        for candidate in candidateBoxes.prefix(8) {
+            let isOverlapping = uniqueBoxes.contains { existing in
+                let intersection = existing.box.intersection(candidate.box)
+                let unionArea = (existing.box.width * existing.box.height) + (candidate.box.width * candidate.box.height) - (intersection.width * intersection.height)
+                return unionArea > 0 && (intersection.width * intersection.height) / unionArea > 0.4
+            }
+            if !isOverlapping {
+                uniqueBoxes.append(candidate)
+            }
+        }
+
+        var summaries: [IOSDetectedObjectSummary] = []
+        for item in uniqueBoxes.prefix(6) {
+            let vBox = item.box
             let uiX = vBox.origin.x
             let uiY = 1.0 - (vBox.origin.y + vBox.size.height)
             let uiW = vBox.size.width
@@ -250,27 +319,8 @@ final class IOSObjectDetectorService: Sendable {
                 Double((uiX + uiW) * 100.0)
             ]
 
-            let pixelRect = CGRect(
-                x: uiX * CGFloat(cgImage.width),
-                y: uiY * CGFloat(cgImage.height),
-                width: max(10, uiW * CGFloat(cgImage.width)),
-                height: max(10, uiH * CGFloat(cgImage.height))
-            ).integral
-
-            var detectedWord = "object"
-            if let crop = cgImage.cropping(to: pixelRect) {
-                let classReq = VNClassifyImageRequest()
-                let h = VNImageRequestHandler(cgImage: crop, options: [:])
-                if (try? h.perform([classReq])) != nil,
-                   let top = classReq.results?.first(where: { $0.confidence > 0.05 }) {
-                    let raw = top.identifier
-                    let last = raw.components(separatedBy: ">").last ?? raw
-                    detectedWord = last.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            }
-
             summaries.append(IOSDetectedObjectSummary(
-                word: detectedWord,
+                word: item.label,
                 xPercent: Double(xPercent),
                 yPercent: Double(yPercent),
                 box2d: box2d
@@ -299,8 +349,6 @@ final class IOSObjectDetectorService: Sendable {
         for top in observation.topLevelContours {
             let box = top.normalizedPath.boundingBox
             if box.width > 0.94 && box.height > 0.94 {
-                // Top-level contour encompasses the bounding rectangle; inspect its child contours
-                // which correspond directly to the physical object inside
                 for child in top.childContours {
                     if child.pointCount >= 8 {
                         let pts = child.normalizedPoints.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
@@ -313,7 +361,6 @@ final class IOSObjectDetectorService: Sendable {
             }
         }
 
-        // Limit to top 3 prominent contour loops to prevent visual clutter
         return Array(loops.prefix(3))
     }
 
@@ -342,10 +389,14 @@ final class IOSObjectDetectorService: Sendable {
         return nil
     }
 
-    // MARK: - Classification & Orientation
+    // MARK: - Local Classification
 
-    /// Runs fast local classification on the cropped object
-    private func detectOnDeviceLabels(for cgImage: CGImage) -> [String] {
+    /// Runs local classification on the cropped object, strictly requiring confidence >= 0.55 and rejecting generic taxonomy words
+    private func detectOnDeviceLabels(for cgImage: CGImage, animalLabel: String?) -> [String] {
+        if let animal = animalLabel, !animal.isEmpty {
+            return [animal]
+        }
+
         let classifyRequest = VNClassifyImageRequest()
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
         guard (try? handler.perform([classifyRequest])) != nil,
@@ -354,15 +405,16 @@ final class IOSObjectDetectorService: Sendable {
         }
 
         let relevant = observations
-            .filter { $0.confidence >= 0.08 }
-            .prefix(4)
+            .filter { $0.confidence >= 0.55 }
+            .prefix(2)
             .map { observation -> String in
-                // Clean identifier, e.g. "kitchen > espresso_maker" -> "espresso maker"
                 let raw = observation.identifier
                 let lastPart = raw.components(separatedBy: ">").last ?? raw
-                return lastPart.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                return lastPart.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             }
-            .filter { !$0.isEmpty }
+            .filter { label in
+                !label.isEmpty && !Self.genericTaxonomyBlacklist.contains(label)
+            }
 
         return Array(relevant)
     }

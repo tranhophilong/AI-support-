@@ -215,9 +215,9 @@ final class SceneVisionAIService {
 
         let preDetectedBlock = preDetected.isEmpty ? "" : """
 
-        Apple Vision Neural Engine pre-detected these physical objects with exact visual coordinates:
-        \(preDetected.map { "- \($0.word) at horizontal: \(Int($0.xPercent))%, vertical: \(Int($0.yPercent))%, bbox: \($0.box2d)" }.joined(separator: "\n"))
-        Please include and prioritize these exact object locations in your objectsDetected array.
+        The device Neural Engine identified \(preDetected.count) key visual regions of interest in this image:
+        \(preDetected.map { "- Region at coordinates (\(Int($0.xPercent))%, \(Int($0.yPercent))%), bbox: \($0.box2d)" }.joined(separator: "\n"))
+        Please inspect what is physically at each of these coordinates, identify the exact English object name, and include them in your objectsDetected array.
         """
 
         let systemInstruction = """
@@ -452,17 +452,18 @@ final class SceneVisionAIService {
 
         let hintsText = detected.onDeviceLabels.isEmpty
             ? ""
-            : "Apple Vision on-device detection hints: \(detected.onDeviceLabels.joined(separator: ", "))."
+            : "Possible visual hint: \(detected.onDeviceLabels.joined(separator: ", ")). Note: prioritize the visible features in the cropped image."
 
         let systemInstruction = """
-        You are an expert English vocabulary tutor and image analyst.
+        You are an expert English vocabulary tutor and computer vision analyst.
         The user isolated a specific physical object from their photo (shown in this cropped image).
         \(hintsText)
 
-        Identify the specific physical object prominently displayed in this cropped image.
+        Look directly at the center of this cropped image and identify the exact everyday physical object (e.g. 'water bottle', 'ceramic mug', 'laptop keyboard', 'wireless mouse', 'sunglasses', 'ballpoint pen').
+        Be specific, grounded, and accurate. Do not guess obscure or unrelated items.
         Respond ONLY with a valid JSON object strictly matching this schema:
         {
-          "word": "Specific English name of this object (e.g., 'ceramic mug', 'laptop keyboard', 'monstera plant', 'wrist watch')",
+          "word": "Specific, accurate English name of this object",
           "phonetic": "/IPA pronunciation/",
           "partOfSpeech": "Noun",
           "vietnameseMeaning": "Clear, natural Vietnamese translation of this object",
@@ -563,9 +564,9 @@ final class SceneVisionAIService {
 
         let preDetectedBlock = preDetected.isEmpty ? "" : """
 
-        Apple Vision Neural Engine pre-detected these physical objects with exact visual coordinates:
-        \(preDetected.map { "- \($0.word) at horizontal: \(Int($0.xPercent))%, vertical: \(Int($0.yPercent))%, bbox: \($0.box2d)" }.joined(separator: "\n"))
-        Please incorporate these objects into your objectsDetected array with their exact points.
+        The device Neural Engine identified \(preDetected.count) key visual regions of interest in this image:
+        \(preDetected.map { "- Region at coordinates (\(Int($0.xPercent))%, \(Int($0.yPercent))%), bbox: \($0.box2d)" }.joined(separator: "\n"))
+        Please inspect what is physically at each of these coordinates, identify the exact English object name, and include them in your objectsDetected array.
         """
 
         let systemInstruction = """
@@ -776,17 +777,18 @@ final class SceneVisionAIService {
 
         let hintsText = detected.onDeviceLabels.isEmpty
             ? ""
-            : "Apple Vision on-device detection hints: \(detected.onDeviceLabels.joined(separator: ", "))."
+            : "Possible visual hint: \(detected.onDeviceLabels.joined(separator: ", ")). Note: prioritize the visible features in the cropped image."
 
         let systemInstruction = """
-        You are an expert English vocabulary tutor.
+        You are an expert English vocabulary tutor and computer vision analyst.
         The user isolated a specific physical object from their photo (shown in this cropped image).
         \(hintsText)
 
-        Identify the specific physical object prominently displayed in this cropped image.
+        Look directly at the center of this cropped image and identify the exact everyday physical object (e.g. 'water bottle', 'ceramic mug', 'laptop keyboard', 'wireless mouse', 'sunglasses', 'ballpoint pen').
+        Be specific, grounded, and accurate. Do not guess obscure or unrelated items.
         Respond ONLY with valid JSON strictly matching this schema:
         {
-          "word": "Specific English noun or noun phrase",
+          "word": "Specific, accurate English noun or noun phrase",
           "phonetic": "/IPA pronunciation/",
           "partOfSpeech": "Noun",
           "vietnameseMeaning": "Clear, natural Vietnamese meaning",

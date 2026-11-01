@@ -937,13 +937,19 @@ struct InteractiveSceneImageViewerSheet: View {
                         contourLoops: detected.contourLoops
                     )
 
-                    // Hiển thị ngay từ vựng nhận biết bởi Apple Vision Neural Engine (0s chờ đợi)
-                    let onDeviceWord = detected.onDeviceLabels.first?.capitalized ?? "Vật thể"
+                    // Hiển thị từ vựng tin cậy từ Apple Vision hoặc placeholder chuẩn
+                    let onDeviceWord: String
+                    if let confident = detected.onDeviceLabels.first, !confident.isEmpty {
+                        onDeviceWord = confident.capitalized
+                    } else {
+                        onDeviceWord = "Vật thể đã chọn"
+                    }
+
                     let preliminaryItem = AISceneObjectVocabularyItem(
                         word: onDeviceWord,
                         phonetic: "",
                         partOfSpeech: "Noun",
-                        vietnameseMeaning: "AI đang bổ sung nghĩa tiếng Việt & ví dụ...",
+                        vietnameseMeaning: "AI đang phân tích chính xác đồ vật...",
                         exampleInContext: "",
                         xPercent: Double(detected.refinedCenterPercent.x),
                         yPercent: Double(detected.refinedCenterPercent.y),
