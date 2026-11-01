@@ -10,6 +10,7 @@ import UIKit
 
 enum NewsCategory: String, CaseIterable, Identifiable, Codable {
     case top = "top"
+    case sports = "sports"
     case tech = "tech"
     case world = "world"
     case business = "business"
@@ -20,6 +21,7 @@ enum NewsCategory: String, CaseIterable, Identifiable, Codable {
     var displayName: String {
         switch self {
         case .top: return "Nóng nhất"
+        case .sports: return "Thể thao"
         case .tech: return "Công nghệ & AI"
         case .world: return "Thế giới"
         case .business: return "Kinh doanh"
@@ -30,6 +32,7 @@ enum NewsCategory: String, CaseIterable, Identifiable, Codable {
     var englishName: String {
         switch self {
         case .top: return "Top Headlines"
+        case .sports: return "Sports"
         case .tech: return "Tech & AI"
         case .world: return "World News"
         case .business: return "Business"
@@ -40,6 +43,7 @@ enum NewsCategory: String, CaseIterable, Identifiable, Codable {
     var iconName: String {
         switch self {
         case .top: return "flame.fill"
+        case .sports: return "soccerball"
         case .tech: return "cpu.fill"
         case .world: return "globe.americas.fill"
         case .business: return "chart.line.uptrend.xyaxis"
@@ -51,6 +55,11 @@ enum NewsCategory: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .top:
             return ["https://feeds.bbci.co.uk/news/rss.xml"]
+        case .sports:
+            return [
+                "https://feeds.bbci.co.uk/sport/rss.xml",
+                "https://www.espn.com/espn/rss/news"
+            ]
         case .tech:
             return [
                 "https://techcrunch.com/feed/",
@@ -159,7 +168,12 @@ final class EnglishNewsService {
             do {
                 let (data, response) = try await session.data(for: request)
                 if let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) {
-                    let sourceName = feedURLString.contains("techcrunch") ? "TechCrunch" : "BBC News"
+                    let sourceName: String = {
+                        if feedURLString.contains("techcrunch") { return "TechCrunch" }
+                        if feedURLString.contains("espn") { return "ESPN" }
+                        if feedURLString.contains("bbci.co.uk/sport") { return "BBC Sport" }
+                        return "BBC News"
+                    }()
                     let parsedItems = parseRSS(data: data, sourceName: sourceName, category: category)
                     allItems.append(contentsOf: parsedItems)
                 }
@@ -449,7 +463,7 @@ final class EnglishNewsService {
         """
 
         let payload: [String: Any] = [
-            "model": "llama-3.3-70b-versatile",
+            "model": "openai/gpt-oss-120b",
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": prompt]
@@ -535,7 +549,7 @@ final class EnglishNewsService {
         )
 
         guard let endpoint = URL(
-            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\(apiKey)"
+            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=\(apiKey)"
         ) else {
             throw URLError(.badURL)
         }
