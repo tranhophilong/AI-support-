@@ -44,83 +44,19 @@ final class CameraPermissionHelper {
     }
 }
 
-// MARK: - Camera Picker View (UIImagePickerController)
+// MARK: - Camera Picker View (Real-Time AR Scanner Camera)
 
-struct CameraPickerView: UIViewControllerRepresentable {
+struct CameraPickerView: View {
     @Binding var selectedImage: UIImage?
     var isPresented: Binding<Bool>?
-    @Environment(\.dismiss) private var dismiss
 
     init(selectedImage: Binding<UIImage?>, isPresented: Binding<Bool>? = nil) {
         self._selectedImage = selectedImage
         self.isPresented = isPresented
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        if UIImagePickerController.isSourceTypeAvailable(.camera) {
-            picker.sourceType = .camera
-            picker.cameraCaptureMode = .photo
-            picker.cameraDevice = .rear
-        } else {
-            picker.sourceType = .photoLibrary
-        }
-        picker.delegate = context.coordinator
-        picker.allowsEditing = false
-        picker.modalPresentationStyle = .fullScreen
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-        let parent: CameraPickerView
-
-        init(_ parent: CameraPickerView) {
-            self.parent = parent
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let image = info[.originalImage] as? UIImage {
-                let fixed = Self.fixOrientation(image)
-                parent.selectedImage = fixed
-            }
-            picker.dismiss(animated: true) { [weak self] in
-                guard let self else { return }
-                if let isPresented = self.parent.isPresented {
-                    isPresented.wrappedValue = false
-                } else {
-                    self.parent.dismiss()
-                }
-            }
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            picker.dismiss(animated: true) { [weak self] in
-                guard let self else { return }
-                if let isPresented = self.parent.isPresented {
-                    isPresented.wrappedValue = false
-                } else {
-                    self.parent.dismiss()
-                }
-            }
-        }
-
-        private static func fixOrientation(_ image: UIImage) -> UIImage {
-            if image.imageOrientation == .up { return image }
-            UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-            image.draw(in: CGRect(origin: .zero, size: image.size))
-            let normalized = UIGraphicsGetImageFromCurrentImageContext()
-            UIGraphicsEndImageContext()
-            return normalized ?? image
-        }
+    var body: some View {
+        RealTimeARScannerCameraView(selectedImage: $selectedImage, isPresented: isPresented)
     }
 }
 
