@@ -572,11 +572,12 @@ struct InteractiveSceneImageViewerSheet: View {
     @State private var isDetectingObject: Bool = false
     @State private var isScanningAllItems: Bool = false
     @State private var detectingPoint: CGPoint? = nil
-    @State private var detectionErrorMessage: String? = nil
     @State private var hasTriggeredLongPress: Bool = false
     @State private var activeLiftedCrop: LiftedCropState? = nil
     @State private var objectThumbnails: [String: UIImage] = [:]
     @State private var detailedObjectItem: AISceneObjectVocabularyItem? = nil
+    @State private var toastMessage: String? = nil
+    @State private var toastTask: Task<Void, Never>? = nil
 
     // Zoom, Pan & Interactive Dismiss States
     @State private var scale: CGFloat = 1.0
@@ -602,7 +603,7 @@ struct InteractiveSceneImageViewerSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .top) {
                 Color.black
                     .opacity(max(0.3, 1.0 - Double(dismissDragOffsetY / 450.0)))
                     .ignoresSafeArea()
@@ -614,6 +615,13 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
                 .offset(y: max(0, dismissDragOffsetY))
                 .scaleEffect(max(0.88, 1.0 - (dismissDragOffsetY / 1500.0)))
+
+                if let message = toastMessage {
+                    toastBannerView(message: message)
+                        .padding(.top, 14)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(200)
+                }
             }
             .navigationTitle("Khám phá từ vựng theo đồ vật")
             .navigationBarTitleDisplayMode(.inline)
@@ -852,28 +860,6 @@ struct InteractiveSceneImageViewerSheet: View {
                     }
                 }
 
-                // Error message banner
-                if let msg = detectionErrorMessage {
-                    VStack {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.Semantic.warning)
-                            Text(msg)
-                                .font(.caption.bold())
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.85))
-                        .clipShape(Capsule())
-                        .shadow(radius: 6)
-                        .padding(.top, 14)
-
-                        Spacer()
-                    }
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
 
                 // Quick Reset Zoom Indicator Badge
                 if scale > 1.05 {
@@ -1056,10 +1042,56 @@ struct InteractiveSceneImageViewerSheet: View {
         }
     }
 
+    private func toastBannerView(message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(AppTheme.Semantic.warning)
+
+            Text(message)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.14).opacity(0.95))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(AppTheme.Semantic.warning.opacity(0.8), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.6), radius: 8, x: 0, y: 4)
+    }
+
+    private func showToast(_ message: String) {
+        toastTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            toastMessage = message
+        }
+        toastTask = Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    toastMessage = nil
+                }
+            }
+        }
+    }
+
+    private func handleDetectionFailure() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        showToast("Can't detect item")
+        withAnimation(.easeOut(duration: 0.3)) {
+            isDetectingObject = false
+            detectingPoint = nil
+            activeLiftedCrop = nil
+        }
+    }
+
     private func detectAllItems() {
         guard !isScanningAllItems else { return }
         isScanningAllItems = true
-        detectionErrorMessage = nil
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -1069,7 +1101,8 @@ struct InteractiveSceneImageViewerSheet: View {
                 await MainActor.run {
                     isScanningAllItems = false
                     if items.isEmpty {
-                        detectionErrorMessage = "Không tìm thấy đồ vật rõ nét nào trong ảnh."
+                        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                        showToast("Can't detect item")
                     } else {
                         currentScene.objectsDetected = items
                         selectedObject = items.first
@@ -1081,7 +1114,8 @@ struct InteractiveSceneImageViewerSheet: View {
             } catch {
                 await MainActor.run {
                     isScanningAllItems = false
-                    detectionErrorMessage = "Lỗi nhận diện: \(error.localizedDescription)"
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    showToast("Can't detect item")
                 }
             }
         }
@@ -1098,12 +1132,9 @@ struct InteractiveSceneImageViewerSheet: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
             detectingPoint = location
             isDetectingObject = true
-            detectionErrorMessage = nil
         }
 
         Task {
-            var createdItemId: String? = nil
-
             do {
                 // 1. Instant on-device Apple Vision detection (~15ms)
                 let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
@@ -1112,7 +1143,7 @@ struct InteractiveSceneImageViewerSheet: View {
                     yPercent: clampedY
                 )
 
-                // 2. NHẬN BIẾT VẬT THỂ TRƯỚC (On-Device Instant Recognition) & Animate Crop/Lift
+                // 2. Animate Laser Contour Border & Lift Cutout (NO PRELIMINARY DUMMY TAG CREATED)
                 await MainActor.run {
                     let box = detected.boundingBoxPercent
                     let rect = CGRect(
@@ -1139,30 +1170,6 @@ struct InteractiveSceneImageViewerSheet: View {
                         contourLoops: detected.contourLoops
                     )
 
-                    // Hiển thị từ vựng tin cậy từ Apple Vision hoặc placeholder chuẩn
-                    let onDeviceWord: String
-                    if let confident = detected.onDeviceLabels.first, !confident.isEmpty {
-                        onDeviceWord = confident.capitalized
-                    } else {
-                        onDeviceWord = "Vật thể đã chọn"
-                    }
-
-                    let preliminaryItem = AISceneObjectVocabularyItem(
-                        word: onDeviceWord,
-                        phonetic: "",
-                        partOfSpeech: "Noun",
-                        vietnameseMeaning: "AI đang phân tích chính xác đồ vật...",
-                        exampleInContext: "",
-                        xPercent: Double(detected.refinedCenterPercent.x),
-                        yPercent: Double(detected.refinedCenterPercent.y),
-                        box2d: detected.box2dGrounding
-                    )
-
-                    createdItemId = preliminaryItem.id
-                    currentScene.objectsDetected.append(preliminaryItem)
-                    selectedObject = preliminaryItem
-                    objectThumbnails[preliminaryItem.id] = detected.cutoutImage ?? detected.croppedImage
-
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
 
                     withAnimation(.spring(response: 0.38, dampingFraction: 0.65)) {
@@ -1170,23 +1177,26 @@ struct InteractiveSceneImageViewerSheet: View {
                     }
                 }
 
-                // 3. ĐƯA CHO AI NHẬN BIẾT & LÀM GIÀU DỮ LIỆU SAU (Background Multimodal AI Enrichment)
+                // 3. Multimodal AI Object Identification
                 let newItem = try await SceneVisionAIService.shared.identifyObject(from: detected)
 
                 await MainActor.run {
+                    let trimmed = newItem.word.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty,
+                          trimmed.lowercased() != "unknown",
+                          trimmed.lowercased() != "none",
+                          trimmed.lowercased() != "object",
+                          trimmed.lowercased() != "item",
+                          trimmed.lowercased() != "vật thể đã chọn" else {
+                        handleDetectionFailure()
+                        return
+                    }
+
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
 
-                    // Cập nhật item sơ bộ bằng dữ liệu AI hoàn chỉnh
-                    if let targetId = createdItemId,
-                       let idx = currentScene.objectsDetected.firstIndex(where: { $0.id == targetId }) {
-                        currentScene.objectsDetected[idx] = newItem
-                        if selectedObject?.id == targetId {
-                            selectedObject = newItem
-                        }
-                    } else {
-                        currentScene.objectsDetected.append(newItem)
-                        selectedObject = newItem
-                    }
+                    // Add verified item to detected list
+                    currentScene.objectsDetected.append(newItem)
+                    selectedObject = newItem
 
                     // Save cropped/cutout thumbnail for persistent display in vocabulary card
                     objectThumbnails[newItem.id] = detected.cutoutImage ?? detected.croppedImage
@@ -1209,31 +1219,7 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
             } catch {
                 await MainActor.run {
-                    // Nếu AI lỗi mạng, người dùng vẫn giữ nguyên vật thể đã nhận biết từ máy!
-                    if let targetId = createdItemId,
-                       let idx = currentScene.objectsDetected.firstIndex(where: { $0.id == targetId }) {
-                        let current = currentScene.objectsDetected[idx]
-                        let fallbackItem = AISceneObjectVocabularyItem(
-                            word: current.word,
-                            phonetic: "",
-                            partOfSpeech: current.partOfSpeech,
-                            vietnameseMeaning: "Đã nhận diện từ thiết bị (AI tạm ngưng kết nối)",
-                            exampleInContext: "",
-                            xPercent: current.xPercent,
-                            yPercent: current.yPercent,
-                            box2d: current.box2d
-                        )
-                        currentScene.objectsDetected[idx] = fallbackItem
-                        if selectedObject?.id == targetId {
-                            selectedObject = fallbackItem
-                        }
-                    }
-
-                    withAnimation {
-                        isDetectingObject = false
-                        detectingPoint = nil
-                        activeLiftedCrop = nil
-                    }
+                    handleDetectionFailure()
                 }
             }
         }

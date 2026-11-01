@@ -167,8 +167,12 @@ final class SceneVisionAIService {
             }
         }
 
-        // 3. Fallback to on-device detected summaries
-        return summaries.map { summary in
+        // 3. Fallback to on-device detected summaries (only if reliable word is found)
+        let filtered = summaries.filter { summary in
+            let w = summary.word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return !w.isEmpty && w != "item" && w != "object" && w != "vật thể đã chọn"
+        }
+        return filtered.map { summary in
             AISceneObjectVocabularyItem(
                 word: summary.word.capitalized,
                 phonetic: "",
@@ -604,6 +608,15 @@ final class SceneVisionAIService {
         }
 
         let parsed = try JSONDecoder().decode(AISceneObjectVocabularyItem.self, from: jsonData)
+        let trimmedWord = parsed.word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedWord.isEmpty,
+              trimmedWord.lowercased() != "unknown",
+              trimmedWord.lowercased() != "none",
+              trimmedWord.lowercased() != "object",
+              trimmedWord.lowercased() != "item",
+              trimmedWord.lowercased() != "vật thể đã chọn" else {
+            throw AIServiceError.apiError(provider: "Groq", message: "Can't detect item")
+        }
 
         return AISceneObjectVocabularyItem(
             word: parsed.word,
@@ -920,6 +933,15 @@ final class SceneVisionAIService {
         }
 
         let parsed = try JSONDecoder().decode(AISceneObjectVocabularyItem.self, from: jsonData)
+        let trimmedWord = parsed.word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedWord.isEmpty,
+              trimmedWord.lowercased() != "unknown",
+              trimmedWord.lowercased() != "none",
+              trimmedWord.lowercased() != "object",
+              trimmedWord.lowercased() != "item",
+              trimmedWord.lowercased() != "vật thể đã chọn" else {
+            throw AIServiceError.apiError(provider: "Gemini", message: "Can't detect item")
+        }
 
         return AISceneObjectVocabularyItem(
             word: parsed.word,
