@@ -903,7 +903,6 @@ struct InteractiveSceneImageViewerSheet: View {
     // Lasso / Swiping Gesture States for Object Cutoff
     @State private var lassoPoints: [CGPoint] = []
     @State private var isDrawingLasso: Bool = false
-    @State private var isLassoMode: Bool = true
     @State private var longPressDetectionTask: Task<Void, Never>? = nil
 
     init(
@@ -1022,8 +1021,6 @@ struct InteractiveSceneImageViewerSheet: View {
                         .gesture(
                             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                                 .onChanged { value in
-                                    if scale > 1.05 && !isLassoMode { return }
-
                                     if lassoPoints.isEmpty {
                                         lassoPoints.append(value.startLocation)
                                         longPressDetectionTask?.cancel()
@@ -1049,7 +1046,6 @@ struct InteractiveSceneImageViewerSheet: View {
                                 }
                                 .onEnded { value in
                                     longPressDetectionTask?.cancel()
-                                    if scale > 1.05 && !isLassoMode { return }
 
                                     if hasTriggeredLongPress {
                                         hasTriggeredLongPress = false
@@ -1227,9 +1223,11 @@ struct InteractiveSceneImageViewerSheet: View {
                                 Image(systemName: "lasso")
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundStyle(AppTheme.Semantic.warning)
-                                Text(currentScene.objectsDetected.isEmpty
-                                     ? "Vuốt khoanh quanh đồ vật hoặc nhấn đè để AI tách nền nhận diện"
-                                     : "Vuốt khoanh quanh đồ vật bất kỳ để AI nhận diện thêm")
+                                Text(scale > 1.05
+                                     ? "1 ngón khoanh đồ vật • 2 ngón để di chuyển & phóng to"
+                                     : (currentScene.objectsDetected.isEmpty
+                                        ? "Vuốt khoanh quanh đồ vật hoặc nhấn đè để AI tách nền nhận diện"
+                                        : "Vuốt khoanh quanh đồ vật bất kỳ để AI nhận diện thêm"))
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(Color.white.opacity(0.9))
                             }
@@ -1244,7 +1242,7 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
 
 
-                // Quick Reset Zoom & Lasso Mode Toggle Badge
+                // Quick Reset Zoom Indicator Badge
                 if scale > 1.05 {
                     VStack {
                         HStack {
@@ -1257,6 +1255,38 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
             }
             .contentShape(Rectangle())
+            .overlay {
+                TwoFingerPanView(
+                    isEnabled: scale > 1.05,
+                    onBegan: {
+                        lassoPoints = []
+                        isDrawingLasso = false
+                        longPressDetectionTask?.cancel()
+                        hasTriggeredLongPress = false
+                    },
+                    onChanged: { translation in
+                        let newX = baseOffset.width + translation.width
+                        let newY = baseOffset.height + translation.height
+                        let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
+                        let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
+                        offset = CGSize(
+                            width: min(maxPanX, max(-maxPanX, newX)),
+                            height: min(maxPanY, max(-maxPanY, newY))
+                        )
+                    },
+                    onEnded: { _ in
+                        let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
+                        let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
+                        let clampedX = min(maxPanX, max(-maxPanX, offset.width))
+                        let clampedY = min(maxPanY, max(-maxPanY, offset.height))
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            offset = CGSize(width: clampedX, height: clampedY)
+                            baseOffset = offset
+                        }
+                    }
+                )
+                .allowsHitTesting(scale > 1.05)
+            }
             .simultaneousGesture(doubleTapGesture)
             .simultaneousGesture(magnificationGesture)
             .simultaneousGesture(panOrDismissGesture(fittedRect: fittedRect))
@@ -1264,51 +1294,26 @@ struct InteractiveSceneImageViewerSheet: View {
     }
 
     private var zoomResetBadge: some View {
-        HStack(spacing: 8) {
-            Button {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
-                    isLassoMode.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: isLassoMode ? "lasso" : "hand.point.up.braille.fill")
-                        .font(.caption2.bold())
-                    Text(isLassoMode ? "Khoanh vùng" : "Di chuyển")
-                        .font(.caption2.bold())
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(isLassoMode ? AppTheme.Semantic.warning.opacity(0.85) : Color.black.opacity(0.75))
-                .clipShape(Capsule())
-                .overlay {
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
-                }
+        Button {
+            resetZoom()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.counterclockwise.circle.fill")
+                    .font(.caption)
+                Text(String(format: "%.1fx", scale))
+                    .font(.caption.bold())
             }
-            .buttonStyle(.plain)
-
-            Button {
-                resetZoom()
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.counterclockwise.circle.fill")
-                        .font(.caption)
-                    Text(String(format: "%.1fx", scale))
-                        .font(.caption.bold())
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.black.opacity(0.75))
-                .clipShape(Capsule())
-                .overlay {
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
-                }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.75))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
             }
-            .buttonStyle(.plain)
         }
+        .buttonStyle(.plain)
     }
 
     private func resetZoom() {
@@ -1317,7 +1322,6 @@ struct InteractiveSceneImageViewerSheet: View {
             baseScale = 1.0
             offset = .zero
             baseOffset = .zero
-            isLassoMode = true
         }
     }
 
@@ -1330,7 +1334,6 @@ struct InteractiveSceneImageViewerSheet: View {
                         baseScale = 1.0
                         offset = .zero
                         baseOffset = .zero
-                        isLassoMode = true
                     } else {
                         scale = 2.5
                         baseScale = 2.5
@@ -1344,6 +1347,12 @@ struct InteractiveSceneImageViewerSheet: View {
     private var magnificationGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
+                // Cancel and clear lasso stroke immediately when pinching
+                lassoPoints = []
+                isDrawingLasso = false
+                longPressDetectionTask?.cancel()
+                hasTriggeredLongPress = false
+
                 let newScale = baseScale * value
                 scale = max(0.85, min(4.5, newScale))
             }
@@ -1354,7 +1363,6 @@ struct InteractiveSceneImageViewerSheet: View {
                         baseScale = 1.0
                         offset = .zero
                         baseOffset = .zero
-                        isLassoMode = true
                     } else {
                         scale = min(4.0, scale)
                         baseScale = scale
@@ -1368,12 +1376,7 @@ struct InteractiveSceneImageViewerSheet: View {
             .onChanged { value in
                 guard !isDrawingLasso else { return }
 
-                if scale > 1.05 && !isLassoMode {
-                    offset = CGSize(
-                        width: baseOffset.width + value.translation.width,
-                        height: baseOffset.height + value.translation.height
-                    )
-                } else if scale <= 1.05 {
+                if scale <= 1.05 {
                     if value.translation.height > 0 {
                         dismissDragOffsetY = value.translation.height
                     }
@@ -1382,17 +1385,7 @@ struct InteractiveSceneImageViewerSheet: View {
             .onEnded { value in
                 guard !isDrawingLasso else { return }
 
-                if scale > 1.05 && !isLassoMode {
-                    let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
-                    let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
-                    let clampedX = min(maxPanX, max(-maxPanX, offset.width))
-                    let clampedY = min(maxPanY, max(-maxPanY, offset.height))
-
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        offset = CGSize(width: clampedX, height: clampedY)
-                        baseOffset = offset
-                    }
-                } else if scale <= 1.05 {
+                if scale <= 1.05 {
                     if value.translation.height > 80 || value.predictedEndTranslation.height > 150 {
                         dismiss()
                     } else {
@@ -2610,5 +2603,88 @@ private struct LassoPathOverlay: View {
             )
         }
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - 2-Finger Pan & Pinch Recognizer
+
+private struct TwoFingerPanView: UIViewRepresentable {
+    var isEnabled: Bool
+    var onBegan: () -> Void
+    var onChanged: (CGSize) -> Void
+    var onEnded: (CGSize) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = TouchForwardingView()
+        view.backgroundColor = .clear
+
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        pan.minimumNumberOfTouches = 2
+        pan.maximumNumberOfTouches = 2
+        pan.cancelsTouchesInView = false
+        pan.delaysTouchesBegan = false
+        pan.delegate = context.coordinator
+        view.addGestureRecognizer(pan)
+
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.cancelsTouchesInView = false
+        pinch.delaysTouchesBegan = false
+        pinch.delegate = context.coordinator
+        view.addGestureRecognizer(pinch)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: TwoFingerPanView
+
+        init(parent: TwoFingerPanView) {
+            self.parent = parent
+        }
+
+        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            if recognizer.state == .began {
+                parent.onBegan()
+            }
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard parent.isEnabled else { return }
+            let translation = recognizer.translation(in: recognizer.view)
+            let size = CGSize(width: translation.x, height: translation.y)
+
+            switch recognizer.state {
+            case .began:
+                parent.onBegan()
+            case .changed:
+                parent.onChanged(size)
+            case .ended, .cancelled:
+                parent.onEnded(size)
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            return true
+        }
+    }
+}
+
+private class TouchForwardingView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit
     }
 }
