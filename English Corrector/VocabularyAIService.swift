@@ -51,20 +51,51 @@ final class VocabularyAIService {
         word: String,
         context: String? = nil
     ) async throws -> AIVocabularyLookupResponse {
-        try await provider.lookupWord(
-            word: word,
-            context: context
-        )
+        do {
+            return try await provider.lookupWord(
+                word: word,
+                context: context
+            )
+        } catch {
+            print("DEBUG: Primary vocabulary provider \(provider.name) failed: \(error). Falling back to backup provider...")
+            if provider.name == "Groq" && !APIKeyStore.geminiAPIKey.isEmpty {
+                for gm in ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"] {
+                    if let res = try? await GeminiVocabularyAIProvider(model: gm).lookupWord(word: word, context: context) {
+                        return res
+                    }
+                }
+            } else if !APIKeyStore.groqAPIKey.isEmpty {
+                for gr in ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] {
+                    if let res = try? await GroqVocabularyAIProvider(model: gr).lookupWord(word: word, context: context) {
+                        return res
+                    }
+                }
+            }
+            throw error
+        }
     }
 
     func quickLookupWord(
         word: String,
         sentence: String
     ) async throws -> AIQuickWordLookupResponse {
-        try await provider.quickLookupWord(
-            word: word,
-            sentence: sentence
-        )
+        do {
+            return try await provider.quickLookupWord(
+                word: word,
+                sentence: sentence
+            )
+        } catch {
+            if provider.name == "Groq" && !APIKeyStore.geminiAPIKey.isEmpty {
+                if let res = try? await GeminiVocabularyAIProvider(model: "gemini-3.8-flash").quickLookupWord(word: word, sentence: sentence) {
+                    return res
+                }
+            } else if !APIKeyStore.groqAPIKey.isEmpty {
+                if let res = try? await GroqVocabularyAIProvider(model: "openai/gpt-oss-120b").quickLookupWord(word: word, sentence: sentence) {
+                    return res
+                }
+            }
+            throw error
+        }
     }
 }
 
@@ -87,20 +118,20 @@ struct VocabularyLookupPrompt {
 
     init(word: String, context: String?) {
         system = """
-        You are an English-Vietnamese dictionary and vocabulary coach.
-        Given an English word (and optional context sentence where the word appeared), provide:
-        - "word": the base or normalized form of the word
-        - "phonetic": IPA pronunciation (e.g. "/ˈnætʃ.ər.əl/")
-        - "partOfSpeech": part of speech (e.g. "noun", "verb", "adjective", "adverb")
-        - "vietnameseMeaning": clear, concise Vietnamese meaning appropriate for the context
+        You are an expert English-Vietnamese dictionary, vocabulary coach, and idiom/phrase specialist.
+        Given an English word or multi-word phrase (and optional context sentence where it appeared), provide:
+        - "word": the base or normalized form of the target word or phrase (e.g. "look forward to", "take into account", "resilient")
+        - "phonetic": accurate IPA pronunciation
+        - "partOfSpeech": grammatical category (e.g. "Phrasal verb", "Idiom", "Collocation", "Noun", "Verb", "Adjective", "Adverb")
+        - "vietnameseMeaning": clear, concise, natural Vietnamese meaning appropriate for the context
         - "englishDefinition": short, easy-to-understand English definition
-        - "exampleSentence": one natural English example sentence using the word
-        - "synonyms": 3 to 6 common English synonyms
-        - "chatTopics": 2 to 3 engaging daily conversation topics related to the word so the user can practice using it in a real chat. Each topic must include:
+        - "exampleSentence": one natural English example sentence using the word or phrase
+        - "synonyms": 3 to 6 common English synonyms or related expressions
+        - "chatTopics": 2 to 3 engaging daily conversation topics related to the word or phrase so the user can practice using it in a real chat. Each topic must include:
           1. "title": short topic title (3 to 6 words)
-          2. "contextDescription": 1 to 2 sentences describing the conversation scenario and instructing the AI coach to help the user practice using the word naturally
-          3. "starterQuestion": a friendly opening question in English from the coach that invites the user to reply using the word
-          4. "sampleReplies": 2 to 3 natural English reply sentences that answer the starterQuestion and actively use the target word
+          2. "contextDescription": 1 to 2 sentences describing the conversation scenario and instructing the AI coach to help the user practice using the word or phrase naturally
+          3. "starterQuestion": a friendly opening question in English from the coach that invites the user to reply using the word or phrase
+          4. "sampleReplies": 2 to 3 natural English reply sentences that answer the starterQuestion and actively use the target word or phrase
         """
 
         let trimmedContext = context?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -156,7 +187,7 @@ final class GeminiVocabularyAIProvider: VocabularyLookupAIProvider {
 
     init(
         apiKey: String = APIKeyStore.geminiAPIKey,
-        model: String = "gemini-3.6-flash",
+        model: String = "gemini-3.8-flash",
         session: URLSession = .shared
     ) {
         self.apiKey = apiKey
