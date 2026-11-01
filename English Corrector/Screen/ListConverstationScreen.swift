@@ -248,7 +248,7 @@ struct ListConversationScreen: View {
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "waveform.and.mic")
-                                Text("Giao tiếp Voice AI & Roleplay")
+                                Text("Voice AI & Roleplay")
                                     .fontWeight(.semibold)
                             }
                             .padding(.horizontal, 24)
@@ -302,7 +302,7 @@ struct ListConversationScreen: View {
                                     Button {
                                         activeVoiceConversation = conversation
                                     } label: {
-                                        Label("Mở Giao tiếp Voice AI", systemImage: "waveform.and.mic")
+                                        Label("Open Voice AI", systemImage: "waveform.and.mic")
                                     }
 
                                     Button(role: .destructive) {
@@ -352,7 +352,7 @@ struct ListConversationScreen: View {
                                 .font(.subheadline)
                                 .foregroundStyle(AppTheme.Primary.p700)
                         }
-                        .accessibilityLabel("Tin tức tiếng Anh nóng hổi")
+                        .accessibilityLabel("Hot English News")
 
                         Button {
                             showVoiceRoleplaySheet = true
@@ -361,7 +361,7 @@ struct ListConversationScreen: View {
                                 .font(.title3)
                                 .foregroundStyle(AppTheme.Accent.a600)
                         }
-                        .accessibilityLabel("Giao tiếp Voice AI")
+                        .accessibilityLabel("Voice AI")
 
                         Button {
                             createConversation()
@@ -499,7 +499,7 @@ struct ListConversationScreen: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text("Giao tiếp Voice AI 2 chiều")
+                        Text("2-Way Voice AI Practice")
                             .font(.subheadline.bold())
                             .foregroundStyle(AppTheme.Neutral.n900)
 
@@ -512,7 +512,7 @@ struct ListConversationScreen: View {
                             .clipShape(Capsule())
                     }
 
-                    Text("Đóng vai tình huống thực tế & luyện phản xạ nghe nói trực tiếp")
+                    Text("Roleplay real scenarios & practice speaking reflexes")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Neutral.n500)
                         .multilineTextAlignment(.leading)
@@ -718,10 +718,8 @@ private struct WidgetOnboardingStep: View {
 // MARK: - Conversation Card & Topic Style
 
 private struct ConversationTopicTheme {
-    let categoryLabel: String
     let icon: String
     let tintColor: Color
-    let badgeBackground: Color
 
     static func resolve(title: String, description: String) -> ConversationTopicTheme {
         let combined = "\(title) \(description)".lowercased()
@@ -733,10 +731,8 @@ private struct ConversationTopicTheme {
         ]
         if workKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                categoryLabel: "CÔNG VIỆC",
                 icon: "briefcase.fill",
-                tintColor: AppTheme.Primary.p500,
-                badgeBackground: AppTheme.Primary.p50
+                tintColor: AppTheme.Primary.p500
             )
         }
 
@@ -747,10 +743,8 @@ private struct ConversationTopicTheme {
         ]
         if foodKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                categoryLabel: "ẨM THỰC & CAFE",
                 icon: "cup.and.saucer.fill",
-                tintColor: AppTheme.Accent.a600,
-                badgeBackground: AppTheme.Accent.a50
+                tintColor: AppTheme.Accent.a600
             )
         }
 
@@ -761,10 +755,8 @@ private struct ConversationTopicTheme {
         ]
         if travelKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                categoryLabel: "DU LỊCH",
                 icon: "airplane.departure",
-                tintColor: AppTheme.Semantic.success,
-                badgeBackground: AppTheme.Semantic.success.opacity(0.12)
+                tintColor: AppTheme.Semantic.success
             )
         }
 
@@ -775,19 +767,90 @@ private struct ConversationTopicTheme {
         ]
         if serviceKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
-                categoryLabel: "ĐỜI SỐNG",
                 icon: "bag.fill",
-                tintColor: AppTheme.Accent.a600,
-                badgeBackground: AppTheme.Accent.a50
+                tintColor: AppTheme.Accent.a600
             )
         }
 
         return ConversationTopicTheme(
-            categoryLabel: "GIAO TIẾP HÀNG NGÀY",
             icon: "bubble.left.and.text.bubble.right.fill",
-            tintColor: AppTheme.Primary.p500,
-            badgeBackground: AppTheme.Primary.p50
+            tintColor: AppTheme.Primary.p500
         )
+    }
+}
+
+/// Dynamic, continuous Lottie-style animated icon without any background or border (strictly 40x40)
+struct AnimatedTopicIconView: View {
+    let icon: String
+    let tintColor: Color
+
+    @State private var isAnimating: Bool = false
+
+    var body: some View {
+        ZStack {
+            if icon.contains("cup") {
+                // Food / Cafe: Rising steam waves and warm pulse
+                VStack(spacing: 1.5) {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(tintColor.opacity(isAnimating ? 0.8 : 0.2))
+                            .frame(width: 3, height: 3)
+                            .offset(y: isAnimating ? -3 : 0)
+                        Circle()
+                            .fill(tintColor.opacity(isAnimating ? 0.25 : 0.85))
+                            .frame(width: 3.5, height: 3.5)
+                            .offset(y: isAnimating ? 0 : -3.5)
+                        Circle()
+                            .fill(tintColor.opacity(isAnimating ? 0.75 : 0.3))
+                            .frame(width: 3, height: 3)
+                            .offset(y: isAnimating ? -2.5 : 0)
+                    }
+                    .frame(height: 6)
+
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(tintColor)
+                        .scaleEffect(isAnimating ? 1.06 : 0.95)
+                }
+            } else if icon.contains("airplane") {
+                // Travel: Aerodynamic soaring tilt and gentle glide
+                Image(systemName: icon)
+                    .font(.system(size: 23, weight: .bold))
+                    .foregroundStyle(tintColor)
+                    .rotationEffect(.degrees(isAnimating ? 4 : -4))
+                    .offset(x: isAnimating ? 1.5 : -1.5, y: isAnimating ? -1.5 : 1.5)
+                    .scaleEffect(isAnimating ? 1.08 : 0.95)
+            } else if icon.contains("bag") {
+                // Shopping & Daily Life: Cheerful hanging bag swing & bounce
+                Image(systemName: icon)
+                    .font(.system(size: 23, weight: .bold))
+                    .foregroundStyle(tintColor)
+                    .rotationEffect(.degrees(isAnimating ? 5 : -5), anchor: .top)
+                    .scaleEffect(isAnimating ? 1.06 : 0.96)
+                    .offset(y: isAnimating ? -1 : 1)
+            } else if icon.contains("briefcase") {
+                // Career / Work: Confident pulse and subtle professional float
+                Image(systemName: icon)
+                    .font(.system(size: 23, weight: .bold))
+                    .foregroundStyle(tintColor)
+                    .scaleEffect(isAnimating ? 1.08 : 0.94)
+                    .offset(y: isAnimating ? -1.2 : 1.2)
+            } else {
+                // Conversation: Interactive speech bubble conversational bounce
+                Image(systemName: icon)
+                    .font(.system(size: 23, weight: .bold))
+                    .foregroundStyle(tintColor)
+                    .scaleEffect(isAnimating ? 1.10 : 0.94)
+                    .rotationEffect(.degrees(isAnimating ? 3 : -3))
+            }
+        }
+        .frame(width: 40, height: 40)
+        .contentShape(Rectangle())
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                isAnimating = true
+            }
+        }
     }
 }
 
@@ -827,7 +890,7 @@ struct ConversationCard: View {
         if msg.isUser {
             let cleaned = msg.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleaned.isEmpty else { return nil }
-            return ("Bạn:", true, cleaned)
+            return ("You:", true, cleaned)
         } else {
             let natural = msg.natural?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let followUp = msg.followUpQuestion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -849,35 +912,17 @@ struct ConversationCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
 
-            // 1. TẦNG HEADER: ICON CHỦ ĐỀ + CATEGORY & NGÀY + TITLE ĐẬM LỚN + NÚT VOICE AI
+            // 1. HEADER: ANIMATED ICON (40*40, NO BG, NO BORDER) + DATE + TITLE + VOICE AI BUTTON
             HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13)
-                        .fill(topicTheme.badgeBackground)
-                        .frame(width: 44, height: 44)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 13)
-                                .strokeBorder(topicTheme.tintColor.opacity(0.28), lineWidth: 0.5)
-                        }
+                AnimatedTopicIconView(
+                    icon: topicTheme.icon,
+                    tintColor: topicTheme.tintColor
+                )
 
-                    Image(systemName: topicTheme.icon)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(topicTheme.tintColor)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(topicTheme.categoryLabel)
-                            .font(.system(size: 10, weight: .heavy))
-                            .tracking(0.4)
-                            .foregroundStyle(topicTheme.tintColor)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2.5)
-                            .background(topicTheme.badgeBackground)
-                            .clipShape(Capsule())
-
-                        Text("•")
-                            .font(.caption2)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(AppTheme.Neutral.n400)
 
                         Text(conversation.createdAt, style: .date)
@@ -899,7 +944,7 @@ struct ConversationCard: View {
                     } label: {
                         Image(systemName: "waveform.and.mic")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(AppTheme.Primary.p700)
+                            .foregroundStyle(AppTheme.Primary.p500)
                             .frame(width: 34, height: 34)
                             .background(AppTheme.Primary.p50)
                             .clipShape(Circle())
@@ -909,11 +954,11 @@ struct ConversationCard: View {
                             }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Mở Voice AI cho hội thoại này")
+                    .accessibilityLabel("Open Voice AI for this conversation")
                 }
             }
 
-            // 2. TẦNG SUBTITLE (NGỮ CẢNH AI): ĐÓNG KHUNG NHẸ CÓ NHÃN RÕ RÀNG
+            // 2. SUBTITLE (CONTEXT IN ENGLISH)
             if !displaySubtitle.isEmpty {
                 HStack(alignment: .top, spacing: 8) {
                     RoundedRectangle(cornerRadius: 2)
@@ -925,7 +970,7 @@ struct ConversationCard: View {
                         HStack(spacing: 4) {
                             Image(systemName: "target")
                                 .font(.system(size: 10, weight: .bold))
-                            Text("Ngữ cảnh tình huống")
+                            Text("Context")
                                 .font(.system(size: 11, weight: .bold))
                         }
                         .foregroundStyle(AppTheme.Neutral.n500)
@@ -948,7 +993,7 @@ struct ConversationCard: View {
             Divider()
                 .overlay(AppTheme.Surface.border.opacity(0.6))
 
-            // 3. TẦNG PREVIEW TIN NHẮN GẦN NHẤT + SỐ LƯỢNG CÂU
+            // 3. PREVIEW: LATEST MESSAGE IN ENGLISH + COUNT
             HStack(alignment: .center, spacing: 8) {
                 if let preview = latestMessagePreview {
                     HStack(spacing: 4) {
@@ -957,7 +1002,7 @@ struct ConversationCard: View {
                         Text(preview.senderLabel)
                             .font(.caption2.weight(.bold))
                     }
-                    .foregroundStyle(preview.isUser ? AppTheme.Primary.p700 : AppTheme.Semantic.success)
+                    .foregroundStyle(preview.isUser ? AppTheme.Primary.p500 : AppTheme.Semantic.success)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(
@@ -976,7 +1021,7 @@ struct ConversationCard: View {
                         .font(.caption2)
                         .foregroundStyle(AppTheme.Accent.a600)
 
-                    Text("Chưa có tin nhắn • Chạm để bắt đầu hội thoại")
+                    Text("No messages yet • Tap to start conversation")
                         .font(.caption)
                         .italic()
                         .foregroundStyle(AppTheme.Neutral.n500)
