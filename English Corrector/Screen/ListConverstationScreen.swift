@@ -732,7 +732,7 @@ private struct ConversationTopicTheme {
         if workKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
                 icon: "briefcase.fill",
-                tintColor: AppTheme.Primary.p500
+                tintColor: AppTheme.Neutral.n900
             )
         }
 
@@ -744,7 +744,7 @@ private struct ConversationTopicTheme {
         if foodKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
                 icon: "cup.and.saucer.fill",
-                tintColor: AppTheme.Accent.a600
+                tintColor: AppTheme.Neutral.n900
             )
         }
 
@@ -756,7 +756,7 @@ private struct ConversationTopicTheme {
         if travelKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
                 icon: "airplane.departure",
-                tintColor: AppTheme.Semantic.success
+                tintColor: AppTheme.Neutral.n900
             )
         }
 
@@ -768,13 +768,13 @@ private struct ConversationTopicTheme {
         if serviceKeywords.contains(where: { combined.contains($0) }) {
             return ConversationTopicTheme(
                 icon: "bag.fill",
-                tintColor: AppTheme.Accent.a600
+                tintColor: AppTheme.Neutral.n900
             )
         }
 
         return ConversationTopicTheme(
             icon: "bubble.left.and.text.bubble.right.fill",
-            tintColor: AppTheme.Primary.p500
+            tintColor: AppTheme.Neutral.n900
         )
     }
 }
@@ -782,7 +782,7 @@ private struct ConversationTopicTheme {
 /// Dynamic, continuous Lottie-style animated icon without any background or border (strictly 40x40)
 struct AnimatedTopicIconView: View {
     let icon: String
-    let tintColor: Color
+    var tintColor: Color = AppTheme.Neutral.n900
 
     @State private var isAnimating: Bool = false
 
