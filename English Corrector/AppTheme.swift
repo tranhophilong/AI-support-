@@ -171,14 +171,105 @@ struct AppThemeWaveDotsView: View {
     }
 }
 
+// MARK: - App Icon Vector Shapes for Loading Indicator
+
+/// Ngôi sao 4 cánh lấp lánh (✦) lấy cảm hứng từ góc phải trên của App Icon
+struct AppIconSparkleShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let cx = rect.midX
+        let cy = rect.midY
+        let top = CGPoint(x: cx, y: rect.minY)
+        let right = CGPoint(x: rect.maxX, y: cy)
+        let bottom = CGPoint(x: cx, y: rect.maxY)
+        let left = CGPoint(x: rect.minX, y: cy)
+
+        // Độ lõm hướng về tâm tạo đường cong mềm như icon AI
+        let insetX = rect.width * 0.14
+        let insetY = rect.height * 0.14
+
+        path.move(to: top)
+        path.addQuadCurve(
+            to: right,
+            control: CGPoint(x: cx + insetX, y: cy - insetY)
+        )
+        path.addQuadCurve(
+            to: bottom,
+            control: CGPoint(x: cx + insetX, y: cy + insetY)
+        )
+        path.addQuadCurve(
+            to: left,
+            control: CGPoint(x: cx - insetX, y: cy + insetY)
+        )
+        path.addQuadCurve(
+            to: top,
+            control: CGPoint(x: cx - insetX, y: cy - insetY)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Chữ "A" bo tròn đậm nét ở trung tâm App Icon
+struct AppIconLetterAShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let width = rect.width
+        let height = rect.height
+
+        let bottomLeft = CGPoint(x: rect.minX + width * 0.14, y: rect.maxY - height * 0.08)
+        let apex = CGPoint(x: rect.midX, y: rect.minY + height * 0.08)
+        let bottomRight = CGPoint(x: rect.maxX - width * 0.14, y: rect.maxY - height * 0.08)
+
+        // Hai chân chữ A hội tụ tại đỉnh
+        path.move(to: bottomLeft)
+        path.addLine(to: apex)
+        path.addLine(to: bottomRight)
+
+        // Thanh ngang chữ A
+        let barY = rect.minY + height * 0.64
+        let barLeft = CGPoint(x: rect.minX + width * 0.25, y: barY)
+        let barRight = CGPoint(x: rect.maxX - width * 0.25, y: barY)
+        path.move(to: barLeft)
+        path.addLine(to: barRight)
+
+        return path
+    }
+}
+
+/// Dấu tích (✓) ở khoảng hở bên phải của vòng chữ C trên App Icon
+struct AppIconCheckmarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+
+        let start = CGPoint(x: rect.minX + w * 0.56, y: rect.minY + h * 0.56)
+        let vertex = CGPoint(x: rect.minX + w * 0.70, y: rect.minY + h * 0.70)
+        let end = CGPoint(x: rect.minX + w * 0.97, y: rect.minY + h * 0.37)
+
+        path.move(to: start)
+        path.addLine(to: vertex)
+        path.addLine(to: end)
+        return path
+    }
+}
+
 struct AppThemeLoadingView: View {
     @Environment(\.controlSize) private var controlSize
 
     var customSize: CGFloat? = nil
     var lineWidth: CGFloat? = nil
+    var isCompleted: Bool = false
 
     @State private var isSpinning = false
     @State private var isPulsing = false
+    @State private var sparklePrimaryPulse = false
+    @State private var sparkleSecondaryPulse = false
+    @State private var checkmarkProgress: CGFloat = 0
+
+    private static let iconCyan = Color(lightHex: 0x06B6D4, darkHex: 0x22D3EE)
+    private static let iconTeal = Color(lightHex: 0x14B8A6, darkHex: 0x2DD4BF)
 
     private var resolvedSize: CGFloat {
         if let customSize {
@@ -207,32 +298,50 @@ struct AppThemeLoadingView: View {
         } else if resolvedSize <= 28 {
             return 3.0
         } else {
-            return 3.6
+            return max(3.6, resolvedSize * 0.105)
         }
+    }
+
+    private var letterLineWidth: CGFloat {
+        max(1.8, resolvedLineWidth * 0.92)
+    }
+
+    private var checkmarkLineWidth: CGFloat {
+        max(1.9, resolvedLineWidth * 0.95)
     }
 
     var body: some View {
         ZStack {
-            // 1. Vòng nền mờ kết hợp màu Primary & Accent
+            // 1. Vòng nền mờ định hình khung tròn của App Icon
             Circle()
                 .stroke(
                     AngularGradient(
                         colors: [
-                            AppTheme.Primary.p100.opacity(0.75),
-                            AppTheme.Accent.a100.opacity(0.75),
-                            AppTheme.Primary.p100.opacity(0.75)
+                            AppTheme.Primary.p100.opacity(0.65),
+                            Self.iconCyan.opacity(0.28),
+                            AppTheme.Primary.p100.opacity(0.65)
                         ],
                         center: .center
                     ),
-                    lineWidth: resolvedLineWidth
+                    lineWidth: resolvedLineWidth * 0.85
                 )
+                .padding(resolvedLineWidth * 0.5)
 
-            // 2. Vòng cung xoay chuyển sắc với các màu hiện có trong AppTheme
+            // 2. Vòng cung chữ C chuyển sắc Indigo -> Cyan đặc trưng của App Icon
             Circle()
-                .trim(from: 0.08, to: isPulsing ? 0.78 : 0.36)
+                .trim(
+                    from: isCompleted ? 0.0 : 0.08,
+                    to: isCompleted ? 0.76 : (isPulsing ? 0.78 : 0.36)
+                )
                 .stroke(
                     AngularGradient(
-                        colors: AppTheme.loadingPalette,
+                        colors: [
+                            AppTheme.Primary.p700,
+                            AppTheme.Primary.p500,
+                            Self.iconCyan,
+                            Self.iconTeal,
+                            AppTheme.Primary.p700
+                        ],
                         center: .center,
                         startAngle: .degrees(0),
                         endAngle: .degrees(360)
@@ -242,30 +351,139 @@ struct AppThemeLoadingView: View {
                         lineCap: .round
                     )
                 )
-                .rotationEffect(.degrees(isSpinning ? 360 : 0))
+                .padding(resolvedLineWidth * 0.5)
+                .rotationEffect(.degrees(isCompleted ? 28 : (isSpinning ? 360 : 0)))
 
-            // 3. Dấu 3 chấm nhảy lên xuống như gợn sóng ở tâm vòng tròn
-            AppThemeWaveDotsView(
-                dotSize: max(2.8, resolvedSize * 0.145),
-                spacing: max(1.6, resolvedSize * 0.065),
-                bounceHeight: max(2.0, resolvedSize * 0.12)
-            )
+            // 3. Chữ "A" bo tròn ở tâm hiệu ứng nhịp thở nhẹ nhàng
+            AppIconLetterAShape()
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            AppTheme.Primary.p500,
+                            AppTheme.Primary.p700
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    style: StrokeStyle(
+                        lineWidth: letterLineWidth,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
+                .frame(width: resolvedSize * 0.48, height: resolvedSize * 0.48)
+                .scaleEffect(isCompleted ? 0.95 : (isPulsing ? 1.05 : 0.91))
+                .offset(
+                    x: isCompleted ? -resolvedSize * 0.045 : 0,
+                    y: resolvedSize * 0.015
+                )
+
+            // 4. Cụm 2 ngôi sao AI 4 cánh (✦) lấp lánh lệch pha ở góc trên bên phải
+            AppIconSparkleShape()
+                .fill(
+                    LinearGradient(
+                        colors: [Self.iconCyan, AppTheme.Primary.p500],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(
+                    width: max(4.5, resolvedSize * 0.25),
+                    height: max(4.5, resolvedSize * 0.25)
+                )
+                .scaleEffect(isCompleted ? 1.0 : (sparklePrimaryPulse ? 1.18 : 0.62))
+                .opacity(isCompleted ? 1.0 : (sparklePrimaryPulse ? 1.0 : 0.45))
+                .rotationEffect(.degrees(isCompleted ? 0 : (sparklePrimaryPulse ? 12 : -8)))
+                .offset(
+                    x: resolvedSize * 0.26,
+                    y: -resolvedSize * 0.27
+                )
+
+            AppIconSparkleShape()
+                .fill(
+                    LinearGradient(
+                        colors: [Self.iconTeal, Self.iconCyan],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(
+                    width: max(3.2, resolvedSize * 0.16),
+                    height: max(3.2, resolvedSize * 0.16)
+                )
+                .scaleEffect(isCompleted ? 1.0 : (sparkleSecondaryPulse ? 1.22 : 0.55))
+                .opacity(isCompleted ? 0.95 : (sparkleSecondaryPulse ? 1.0 : 0.35))
+                .rotationEffect(.degrees(isCompleted ? 0 : (sparkleSecondaryPulse ? -15 : 10)))
+                .offset(
+                    x: resolvedSize * 0.39,
+                    y: -resolvedSize * 0.12
+                )
+
+            // 5. Dấu tích hoàn thành (✓) bên phải khi isCompleted = true
+            AppIconCheckmarkShape()
+                .trim(from: 0, to: isCompleted ? checkmarkProgress : 0)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Self.iconTeal,
+                            Self.iconCyan,
+                            AppTheme.Primary.p500
+                        ],
+                        startPoint: .bottomLeading,
+                        endPoint: .topTrailing
+                    ),
+                    style: StrokeStyle(
+                        lineWidth: checkmarkLineWidth,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
         }
         .frame(width: resolvedSize, height: resolvedSize)
         .fixedSize()
         .onAppear {
-            isSpinning = false
-            isPulsing = false
-            DispatchQueue.main.async {
-                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
-                    isSpinning = true
+            if isCompleted {
+                checkmarkProgress = 1.0
+            } else {
+                startLoadingAnimations()
+            }
+        }
+        .onChange(of: isCompleted) { _, completed in
+            if completed {
+                checkmarkProgress = 0
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                    checkmarkProgress = 1.0
                 }
-                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                    isPulsing = true
+            } else {
+                checkmarkProgress = 0
+                startLoadingAnimations()
+            }
+        }
+        .accessibilityLabel(isCompleted ? "Đã hoàn thành" : "Đang tải")
+    }
+
+    private func startLoadingAnimations() {
+        isSpinning = false
+        isPulsing = false
+        sparklePrimaryPulse = false
+        sparkleSecondaryPulse = false
+
+        DispatchQueue.main.async {
+            withAnimation(.linear(duration: 1.05).repeatForever(autoreverses: false)) {
+                isSpinning = true
+            }
+            withAnimation(.easeInOut(duration: 0.78).repeatForever(autoreverses: true)) {
+                isPulsing = true
+            }
+            withAnimation(.easeInOut(duration: 0.62).repeatForever(autoreverses: true)) {
+                sparklePrimaryPulse = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                withAnimation(.easeInOut(duration: 0.58).repeatForever(autoreverses: true)) {
+                    sparkleSecondaryPulse = true
                 }
             }
         }
-        .accessibilityLabel("Đang tải")
     }
 }
 
