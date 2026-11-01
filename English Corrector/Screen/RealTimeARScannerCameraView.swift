@@ -64,6 +64,14 @@ public struct RealTimeARScannerCameraView: View {
         self.isPresented = isPresented
     }
 
+    private var safeAreaTop: CGFloat {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            return max(window.safeAreaInsets.top, 44)
+        }
+        return 50
+    }
+
     public var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -82,23 +90,26 @@ public struct RealTimeARScannerCameraView: View {
                     arOverlayLayer(containerSize: geometry.size)
                 }
 
-                // 3. Top HUD Toolbar
-                VStack {
+                // 3. Top HUD Toolbar & Bottom Controls
+                VStack(spacing: 0) {
                     topHUDToolbar
-                        .padding(.top, geometry.safeAreaInsets.top > 0 ? geometry.safeAreaInsets.top : 20)
+                        .padding(.top, safeAreaTop + 6)
                         .padding(.horizontal, 16)
+                        .zIndex(100)
 
                     if let toast = toastMessage {
                         toastBannerView(message: toast)
                             .padding(.top, 10)
                             .transition(.move(edge: .top).combined(with: .opacity))
+                            .zIndex(101)
                     }
 
                     Spacer()
 
                     // 4. Bottom Capture & Mode Controls
                     bottomControlBar
-                        .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
+                        .padding(.bottom, max(geometry.safeAreaInsets.bottom, 20))
+                        .zIndex(100)
                 }
             }
         }
@@ -149,13 +160,22 @@ public struct RealTimeARScannerCameraView: View {
         HStack {
             // Close Button
             Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 closeCamera()
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white.opacity(0.85))
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.65))
+                        .frame(width: 44, height: 44)
+
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Đóng camera")
 
             Spacer()
 
@@ -353,6 +373,16 @@ public struct RealTimeARScannerCameraView: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+
+                Button {
+                    closeCamera()
+                } label: {
+                    Text("Đóng")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                        .padding(.top, 4)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -438,11 +468,12 @@ public struct RealTimeARScannerCameraView: View {
     }
 
     private func closeCamera() {
+        cameraManager.stopSession()
+        SpeechSynthesizerManager.shared.stop()
         if let isPresented {
             isPresented.wrappedValue = false
-        } else {
-            dismiss()
         }
+        dismiss()
     }
 }
 
