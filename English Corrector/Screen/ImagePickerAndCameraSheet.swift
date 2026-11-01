@@ -473,18 +473,59 @@ struct SceneDescriptionCardView: View {
     }
 
     private func cropImageFromFull(image: UIImage, item: AISceneObjectVocabularyItem) -> UIImage? {
-        guard let cgImage = image.cgImage else { return nil }
+        let normalizedImage: UIImage
+        if image.imageOrientation == .up {
+            normalizedImage = image
+        } else {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = image.scale
+            normalizedImage = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+        }
+        guard let cgImage = normalizedImage.cgImage else { return nil }
         let imgW = CGFloat(cgImage.width)
         let imgH = CGFloat(cgImage.height)
+
+        if let box = item.box2d, box.count >= 4 {
+            let norm = { (v: Double) -> CGFloat in
+                if v > 100.0 { return CGFloat(max(0.0, min(1.0, v / 1000.0))) }
+                if v <= 1.0 && v > 0.0 { return CGFloat(max(0.0, min(1.0, v))) }
+                return CGFloat(max(0.0, min(1.0, v / 100.0)))
+            }
+            let minY = norm(box[0])
+            let minX = norm(box[1])
+            let maxY = norm(box[2])
+            let maxX = norm(box[3])
+            let w = max(0.04, maxX - minX)
+            let h = max(0.04, maxY - minY)
+            let padX = w * 0.14
+            let padTop = h * 0.14
+            let padBottom = h * 0.18
+            let pMinX = max(0.0, minX - padX)
+            let pMinY = max(0.0, minY - padTop)
+            let pMaxX = min(1.0, maxX + padX)
+            let pMaxY = min(1.0, maxY + padBottom)
+            let cropRect = CGRect(
+                x: pMinX * imgW,
+                y: pMinY * imgH,
+                width: max(20, (pMaxX - pMinX) * imgW),
+                height: max(20, (pMaxY - pMinY) * imgH)
+            ).integral
+            if let croppedCg = cgImage.cropping(to: cropRect) {
+                return UIImage(cgImage: croppedCg)
+            }
+        }
+
         let boxW = min(imgW, max(60, imgW * 0.35))
         let boxH = min(imgH, max(60, imgH * 0.35))
         let rawX = CGFloat(item.xPercent ?? 50.0) / 100.0
         let rawY = CGFloat(item.yPercent ?? 50.0) / 100.0
         let originX = max(0, min(imgW - boxW, rawX * imgW - boxW / 2.0))
         let originY = max(0, min(imgH - boxH, rawY * imgH - boxH / 2.0))
-        let cropRect = CGRect(x: originX, y: originY, width: boxW, height: boxH)
+        let cropRect = CGRect(x: originX, y: originY, width: boxW, height: boxH).integral
         if let croppedCg = cgImage.cropping(to: cropRect) {
-            return UIImage(cgImage: croppedCg, scale: image.scale, orientation: image.imageOrientation)
+            return UIImage(cgImage: croppedCg)
         }
         return nil
     }
@@ -1012,21 +1053,28 @@ struct InteractiveSceneImageViewerSheet: View {
 
                                     let xs = lassoPoints.map { $0.x }
                                     let ys = lassoPoints.map { $0.y }
-                                    let minX = xs.min() ?? 0
-                                    let maxX = xs.max() ?? 0
-                                    let minY = ys.min() ?? 0
-                                    let maxY = ys.max() ?? 0
-                                    let boxW = maxX - minX
-                                    let boxH = maxY - minY
+                                    let rawMinX = xs.min() ?? 0
+                                    let rawMaxX = xs.max() ?? 0
+                                    let rawMinY = ys.min() ?? 0
+                                    let rawMaxY = ys.max() ?? 0
+                                    let rawBoxW = rawMaxX - rawMinX
+                                    let rawBoxH = rawMaxY - rawMinY
                                     let totalDist = zip(lassoPoints, lassoPoints.dropFirst()).reduce(0.0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
 
-                                    if totalDist < 16 || (boxW < 12 && boxH < 12) {
+                                    if totalDist < 16 || (rawBoxW < 12 && rawBoxH < 12) {
                                         withAnimation {
                                             selectedObject = nil
                                         }
                                         lassoPoints = []
                                         isDrawingLasso = false
                                     } else {
+                                        let minX = max(0, min(fittedRect.width, rawMinX))
+                                        let maxX = max(minX + 1, min(fittedRect.width, rawMaxX))
+                                        let minY = max(0, min(fittedRect.height, rawMinY))
+                                        // Allow slightly generous bottom bound when user swipes around a large object
+                                        let maxY = max(minY + 1, min(fittedRect.height, rawMaxY + max(8, rawBoxH * 0.06)))
+                                        let boxW = maxX - minX
+                                        let boxH = maxY - minY
                                         let midX = (minX + maxX) / 2.0
                                         let midY = (minY + maxY) / 2.0
                                         let boxPercent = CGRect(
@@ -1748,17 +1796,57 @@ struct InteractiveSceneImageViewerSheet: View {
         if let existing = objectThumbnails[item.id] {
             return existing
         }
-        guard let cgImage = image.cgImage else { return nil }
-        let coords = resolvedCoordinates(for: item, index: 0, total: 1)
+        let normalizedImage: UIImage
+        if image.imageOrientation == .up {
+            normalizedImage = image
+        } else {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = image.scale
+            normalizedImage = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+        }
+        guard let cgImage = normalizedImage.cgImage else { return nil }
         let imgW = CGFloat(cgImage.width)
         let imgH = CGFloat(cgImage.height)
-        let boxW = min(imgW, max(60, imgW * 0.35))
-        let boxH = min(imgH, max(60, imgH * 0.35))
-        let originX = max(0, min(imgW - boxW, (CGFloat(coords.x) / 100.0) * imgW - boxW / 2.0))
-        let originY = max(0, min(imgH - boxH, (CGFloat(coords.y) / 100.0) * imgH - boxH / 2.0))
-        let cropRect = CGRect(x: originX, y: originY, width: boxW, height: boxH)
+
+        let cropRect: CGRect
+        if let box = item.box2d, box.count >= 4 {
+            let norm = { (v: Double) -> CGFloat in
+                if v > 100.0 { return CGFloat(max(0.0, min(1.0, v / 1000.0))) }
+                if v <= 1.0 && v > 0.0 { return CGFloat(max(0.0, min(1.0, v))) }
+                return CGFloat(max(0.0, min(1.0, v / 100.0)))
+            }
+            let minY = norm(box[0])
+            let minX = norm(box[1])
+            let maxY = norm(box[2])
+            let maxX = norm(box[3])
+            let w = max(0.04, maxX - minX)
+            let h = max(0.04, maxY - minY)
+            let padX = w * 0.14
+            let padTop = h * 0.14
+            let padBottom = h * 0.18
+            let pMinX = max(0.0, minX - padX)
+            let pMinY = max(0.0, minY - padTop)
+            let pMaxX = min(1.0, maxX + padX)
+            let pMaxY = min(1.0, maxY + padBottom)
+            cropRect = CGRect(
+                x: pMinX * imgW,
+                y: pMinY * imgH,
+                width: max(20, (pMaxX - pMinX) * imgW),
+                height: max(20, (pMaxY - pMinY) * imgH)
+            ).integral
+        } else {
+            let coords = resolvedCoordinates(for: item, index: 0, total: 1)
+            let boxW = min(imgW, max(60, imgW * 0.35))
+            let boxH = min(imgH, max(60, imgH * 0.35))
+            let originX = max(0, min(imgW - boxW, (CGFloat(coords.x) / 100.0) * imgW - boxW / 2.0))
+            let originY = max(0, min(imgH - boxH, (CGFloat(coords.y) / 100.0) * imgH - boxH / 2.0))
+            cropRect = CGRect(x: originX, y: originY, width: boxW, height: boxH).integral
+        }
+
         if let croppedCg = cgImage.cropping(to: cropRect) {
-            let cropped = UIImage(cgImage: croppedCg, scale: image.scale, orientation: image.imageOrientation)
+            let cropped = UIImage(cgImage: croppedCg)
             DispatchQueue.main.async {
                 self.objectThumbnails[item.id] = cropped
             }
@@ -2190,12 +2278,14 @@ struct LiftedCropObjectOverlayView: View {
 
     var body: some View {
         let displayImage = cropState.cutoutImage ?? cropState.image
+        let isLargeObject = cropState.rect.height > 200 || cropState.rect.width > 200
+        let liftedScale: CGFloat = isLargeObject ? 1.03 : 1.08
 
         ZStack {
             // 1. Cutout / Cropped Object Image with smooth rounded frame
             Image(uiImage: displayImage)
                 .resizable()
-                .scaledToFill()
+                .scaledToFit()
                 .frame(width: max(20, cropState.rect.width), height: max(20, cropState.rect.height))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .contentShape(Rectangle())
@@ -2227,7 +2317,7 @@ struct LiftedCropObjectOverlayView: View {
                     x: 0,
                     y: 0
                 )
-                .scaleEffect(cropState.isLifted ? 1.08 : 0.95)
+                .scaleEffect(cropState.isLifted ? liftedScale : 0.96)
 
             // Floating status badge above the lifted object
             if !cropState.isAICompleted {
