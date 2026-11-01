@@ -191,6 +191,7 @@ struct SceneDescriptionCardView: View {
     var isWordSaved: ((String) -> Bool)? = nil
 
     @State private var showInteractiveViewer = false
+    @State private var detailedObjectItem: AISceneObjectVocabularyItem? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -219,6 +220,15 @@ struct SceneDescriptionCardView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
+        }
+        .sheet(item: $detailedObjectItem) { targetItem in
+            CroppedObjectDetailSheet(
+                item: targetItem,
+                objectImage: (imageData != nil && UIImage(data: imageData!) != nil) ? cropImageFromFull(image: UIImage(data: imageData!)!, item: targetItem) : nil,
+                fullImage: imageData.flatMap { UIImage(data: $0) },
+                isSaved: isWordSaved?(targetItem.word) ?? false,
+                onSaveWord: onSaveWord
+            )
         }
     }
 
@@ -381,44 +391,83 @@ struct SceneDescriptionCardView: View {
         }
     }
 
+    private func cropImageFromFull(image: UIImage, item: AISceneObjectVocabularyItem) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+        let imgW = CGFloat(cgImage.width)
+        let imgH = CGFloat(cgImage.height)
+        let boxW = min(imgW, max(60, imgW * 0.35))
+        let boxH = min(imgH, max(60, imgH * 0.35))
+        let rawX = CGFloat(item.xPercent ?? 50.0) / 100.0
+        let rawY = CGFloat(item.yPercent ?? 50.0) / 100.0
+        let originX = max(0, min(imgW - boxW, rawX * imgW - boxW / 2.0))
+        let originY = max(0, min(imgH - boxH, rawY * imgH - boxH / 2.0))
+        let cropRect = CGRect(x: originX, y: originY, width: boxW, height: boxH)
+        if let croppedCg = cgImage.cropping(to: cropRect) {
+            return UIImage(cgImage: croppedCg, scale: image.scale, orientation: image.imageOrientation)
+        }
+        return nil
+    }
+
     private func objectItemRow(_ item: AISceneObjectVocabularyItem) -> some View {
         let isSaved = isWordSaved?(item.word) ?? false
 
         return HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(item.word)
-                        .font(.subheadline.bold())
-                        .foregroundStyle(AppTheme.Neutral.n900)
-
-                    if !item.phonetic.isEmpty {
-                        Text(item.phonetic)
-                            .font(.caption2)
-                            .foregroundStyle(AppTheme.Neutral.n500)
+            Button {
+                detailedObjectItem = item
+            } label: {
+                HStack(spacing: 8) {
+                    if let imageData, let fullImg = UIImage(data: imageData), let thumb = cropImageFromFull(image: fullImg, item: item) {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(AppTheme.Semantic.warning.opacity(0.8), lineWidth: 1)
+                            }
                     }
 
-                    Text(item.partOfSpeech)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(AppTheme.Accent.a600)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(AppTheme.Accent.a50)
-                        .clipShape(Capsule())
-                }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(item.word)
+                                .font(.subheadline.bold())
+                                .foregroundStyle(AppTheme.Neutral.n900)
 
-                Text(item.vietnameseMeaning)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Neutral.n700)
+                            if !item.phonetic.isEmpty {
+                                Text(item.phonetic)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.Neutral.n500)
+                            }
 
-                if !item.exampleInContext.isEmpty {
-                    Text("• \(item.exampleInContext)")
-                        .font(.caption2)
-                        .italic()
-                        .foregroundStyle(AppTheme.Neutral.n500)
+                            Text(item.partOfSpeech)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(AppTheme.Accent.a600)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(AppTheme.Accent.a50)
+                                .clipShape(Capsule())
+                        }
+
+                        Text(item.vietnameseMeaning)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Neutral.n700)
+                            .lineLimit(1)
+                    }
                 }
             }
+            .buttonStyle(.plain)
 
             Spacer()
+
+            Button {
+                detailedObjectItem = item
+            } label: {
+                Image(systemName: "magnifyingglass.circle.fill")
+                    .font(.body)
+                    .foregroundStyle(AppTheme.Neutral.n500)
+            }
+            .buttonStyle(.plain)
 
             SpeakButton(
                 text: item.word,
@@ -527,6 +576,7 @@ struct InteractiveSceneImageViewerSheet: View {
     @State private var hasTriggeredLongPress: Bool = false
     @State private var activeLiftedCrop: LiftedCropState? = nil
     @State private var objectThumbnails: [String: UIImage] = [:]
+    @State private var detailedObjectItem: AISceneObjectVocabularyItem? = nil
 
     // Zoom, Pan & Interactive Dismiss States
     @State private var scale: CGFloat = 1.0
@@ -577,6 +627,15 @@ struct InteractiveSceneImageViewerSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     closeButton
                 }
+            }
+            .sheet(item: $detailedObjectItem) { targetItem in
+                CroppedObjectDetailSheet(
+                    item: targetItem,
+                    objectImage: objectThumbnails[targetItem.id] ?? cropImage(for: targetItem),
+                    fullImage: image,
+                    isSaved: isWordSaved?(targetItem.word) ?? false,
+                    onSaveWord: onSaveWord
+                )
             }
             .onAppear {
                 withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
@@ -710,7 +769,12 @@ struct InteractiveSceneImageViewerSheet: View {
                     if let lifted = activeLiftedCrop {
                         LiftedCropObjectOverlayView(
                             cropState: lifted,
-                            accentColor: AppTheme.Semantic.warning
+                            accentColor: AppTheme.Semantic.warning,
+                            onOpenDetail: {
+                                if let sel = selectedObject {
+                                    detailedObjectItem = sel
+                                }
+                            }
                         )
                     }
 
@@ -1293,50 +1357,112 @@ struct InteractiveSceneImageViewerSheet: View {
         )
     }
 
+    private func cropImage(for item: AISceneObjectVocabularyItem) -> UIImage? {
+        if let existing = objectThumbnails[item.id] {
+            return existing
+        }
+        guard let cgImage = image.cgImage else { return nil }
+        let coords = resolvedCoordinates(for: item, index: 0, total: 1)
+        let imgW = CGFloat(cgImage.width)
+        let imgH = CGFloat(cgImage.height)
+        let boxW = min(imgW, max(60, imgW * 0.35))
+        let boxH = min(imgH, max(60, imgH * 0.35))
+        let originX = max(0, min(imgW - boxW, (CGFloat(coords.x) / 100.0) * imgW - boxW / 2.0))
+        let originY = max(0, min(imgH - boxH, (CGFloat(coords.y) / 100.0) * imgH - boxH / 2.0))
+        let cropRect = CGRect(x: originX, y: originY, width: boxW, height: boxH)
+        if let croppedCg = cgImage.cropping(to: cropRect) {
+            let cropped = UIImage(cgImage: croppedCg, scale: image.scale, orientation: image.imageOrientation)
+            DispatchQueue.main.async {
+                self.objectThumbnails[item.id] = cropped
+            }
+            return cropped
+        }
+        return nil
+    }
+
     private func selectedObjectCard(_ item: AISceneObjectVocabularyItem) -> some View {
         let isSaved = isWordSaved?(item.word) ?? false
+        let thumb = objectThumbnails[item.id] ?? cropImage(for: item)
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 10) {
-                if let thumb = objectThumbnails[item.id] {
-                    Image(uiImage: thumb)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(AppTheme.Semantic.warning.opacity(0.8), lineWidth: 1)
+                if let thumb {
+                    Button {
+                        detailedObjectItem = item
+                    } label: {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image(uiImage: thumb)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .strokeBorder(AppTheme.Semantic.warning.opacity(0.85), lineWidth: 1.5)
+                                }
+
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(3)
+                                .background(Color.black.opacity(0.75))
+                                .clipShape(Circle())
+                                .offset(x: -2, y: -2)
                         }
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(item.word)
-                            .font(.headline.bold())
-                            .foregroundStyle(.white)
-
-                        if !item.phonetic.isEmpty {
-                            Text(item.phonetic)
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.Neutral.n400)
-                        }
-
-                        Text(item.partOfSpeech)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(AppTheme.Accent.a600)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(AppTheme.Accent.a50)
-                            .clipShape(Capsule())
                     }
-
-                    Text(item.vietnameseMeaning)
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.Semantic.warning)
+                    .buttonStyle(.plain)
                 }
+
+                Button {
+                    detailedObjectItem = item
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(item.word)
+                                .font(.headline.bold())
+                                .foregroundStyle(.white)
+
+                            if !item.phonetic.isEmpty {
+                                Text(item.phonetic)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Neutral.n400)
+                            }
+
+                            Text(item.partOfSpeech)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(AppTheme.Accent.a600)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(AppTheme.Accent.a50)
+                                .clipShape(Capsule())
+                        }
+
+                        Text(item.vietnameseMeaning)
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Semantic.warning)
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
 
                 Spacer()
+
+                Button {
+                    detailedObjectItem = item
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.caption2.bold())
+                        Text("Chi tiết")
+                            .font(.caption2.bold())
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.18))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
 
                 SpeakButton(
                     text: item.word,
@@ -1657,6 +1783,7 @@ struct RunningContourLaserBorderView: View {
 struct LiftedCropObjectOverlayView: View {
     let cropState: LiftedCropState
     let accentColor: Color
+    var onOpenDetail: (() -> Void)? = nil
 
     @State private var pulseGlow: Bool = false
 
@@ -1670,6 +1797,10 @@ struct LiftedCropObjectOverlayView: View {
                 .scaledToFill()
                 .frame(width: max(20, cropState.rect.width), height: max(20, cropState.rect.height))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenDetail?()
+                }
                 // 2. High-Tech Animated Laser Border RUNNING AROUND THE ITEM
                 .overlay {
                     RunningContourLaserBorderView(
@@ -1800,5 +1931,228 @@ struct ViewfinderCornerBracketsView: View {
             .stroke(color, style: StrokeStyle(lineWidth: thickness, lineCap: .round, lineJoin: .round))
         }
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Cropped Object Detail Sheet (Xem chi tiết ảnh đã nhấn đè)
+
+struct CroppedObjectDetailSheet: View {
+    let item: AISceneObjectVocabularyItem
+    let objectImage: UIImage?
+    let fullImage: UIImage?
+    let isSaved: Bool
+    let onSaveWord: ((AISceneObjectVocabularyItem) -> Void)?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var baseZoomScale: CGFloat = 1.0
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        // 1. Phóng to ảnh vật thể đã nhấn đè / bóc tách
+                        if let objectImage {
+                            VStack(spacing: 8) {
+                                ZStack(alignment: .bottomTrailing) {
+                                    Image(uiImage: objectImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: .infinity)
+                                        .frame(maxHeight: 280)
+                                        .scaleEffect(zoomScale)
+                                        .gesture(
+                                            MagnificationGesture()
+                                                .onChanged { val in
+                                                    zoomScale = max(0.9, min(3.5, baseZoomScale * val))
+                                                }
+                                                .onEnded { _ in
+                                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                                        if zoomScale < 1.05 {
+                                                            zoomScale = 1.0
+                                                            baseZoomScale = 1.0
+                                                        } else {
+                                                            baseZoomScale = zoomScale
+                                                        }
+                                                    }
+                                                }
+                                        )
+                                        .simultaneousGesture(
+                                            TapGesture(count: 2).onEnded {
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                                    zoomScale = (zoomScale > 1.1) ? 1.0 : 2.2
+                                                    baseZoomScale = zoomScale
+                                                }
+                                            }
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 18)
+                                                .strokeBorder(
+                                                    LinearGradient(
+                                                        colors: [
+                                                            AppTheme.Semantic.warning,
+                                                            .white.opacity(0.8),
+                                                            AppTheme.Primary.p300
+                                                        ],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    ),
+                                                    lineWidth: 1.5
+                                                )
+                                        }
+                                        .shadow(color: AppTheme.Semantic.warning.opacity(0.35), radius: 14)
+
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "camera.viewfinder")
+                                            .font(.caption2.bold())
+                                            .foregroundStyle(AppTheme.Semantic.warning)
+                                        Text("Ảnh bóc tách")
+                                            .font(.caption2.bold())
+                                            .foregroundStyle(.white)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Color.black.opacity(0.85))
+                                    .clipShape(Capsule())
+                                    .padding(12)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 10)
+
+                                Text("Chụm 2 ngón tay hoặc chạm đúp để phóng to ảnh")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.Neutral.n400)
+                            }
+                        }
+
+                        // 2. Thẻ chi tiết từ vựng và ngữ cảnh
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(alignment: .center, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 8) {
+                                        Text(item.word)
+                                            .font(.title2.bold())
+                                            .foregroundStyle(.white)
+
+                                        Text(item.partOfSpeech)
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundStyle(AppTheme.Accent.a600)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(AppTheme.Accent.a50)
+                                            .clipShape(Capsule())
+                                    }
+
+                                    if !item.phonetic.isEmpty {
+                                        Text(item.phonetic)
+                                            .font(.subheadline)
+                                            .foregroundStyle(AppTheme.Neutral.n400)
+                                    }
+                                }
+
+                                Spacer()
+
+                                SpeakButton(
+                                    text: item.word,
+                                    font: .title3,
+                                    activeColor: AppTheme.Primary.p300
+                                )
+                            }
+
+                            Divider().background(Color.white.opacity(0.15))
+
+                            // Nghĩa tiếng Việt
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Nghĩa tiếng Việt")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(AppTheme.Neutral.n400)
+                                    .textCase(.uppercase)
+
+                                Text(item.vietnameseMeaning)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(AppTheme.Semantic.warning)
+                            }
+
+                            // Câu ví dụ trong ngữ cảnh
+                            if !item.exampleInContext.isEmpty {
+                                Divider().background(Color.white.opacity(0.15))
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Câu ví dụ trong ngữ cảnh ảnh")
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(AppTheme.Neutral.n400)
+                                        .textCase(.uppercase)
+
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text("“\(item.exampleInContext)”")
+                                            .font(.subheadline)
+                                            .italic()
+                                            .foregroundStyle(.white.opacity(0.95))
+
+                                        Spacer()
+
+                                        SpeakButton(
+                                            text: item.exampleInContext,
+                                            font: .caption,
+                                            activeColor: AppTheme.Primary.p300
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16)
+                                .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .padding(.horizontal, 16)
+
+                        // 3. Nút lưu vào sổ từ vựng
+                        if let onSaveWord {
+                            Button {
+                                onSaveWord(item)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                                        .font(.headline)
+                                    Text(isSaved ? "Đã lưu vào sổ từ vựng" : "Lưu vào sổ từ vựng cá nhân")
+                                        .font(.headline.bold())
+                                }
+                                .foregroundStyle(isSaved ? .white : .black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(isSaved ? AppTheme.Primary.p500 : AppTheme.Semantic.warning)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .shadow(radius: 6)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
+            }
+            .navigationTitle("Chi tiết ảnh & từ vựng")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.black, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+            }
+        }
     }
 }
