@@ -43,11 +43,59 @@ final class AIService {
         context: String,
         recentHistory: [String] = []
     ) async throws -> AICorrectionResponse {
-        try await provider.improveEnglish(
-            userInput: userInput,
-            context: context,
-            recentHistory: recentHistory
-        )
+        do {
+            return try await provider.improveEnglish(
+                userInput: userInput,
+                context: context,
+                recentHistory: recentHistory
+            )
+        } catch {
+            print("DEBUG: Primary provider \(provider.name) improveEnglish failed: \(error). Trying backup providers...")
+
+            // 1. If Groq failed, try fallback Groq model llama-3.3-70b-versatile
+            if provider.name == "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
+                do {
+                    return try await GroqAIProvider(model: "llama-3.3-70b-versatile").improveEnglish(
+                        userInput: userInput,
+                        context: context,
+                        recentHistory: recentHistory
+                    )
+                } catch {
+                    print("DEBUG: Backup Groq model failed: \(error). Falling back to Gemini...")
+                }
+            }
+
+            // 2. Try Gemini backup models
+            if !APIKeyStore.geminiAPIKey.isEmpty {
+                let geminiFallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+                for gemModel in geminiFallbackModels {
+                    do {
+                        return try await GeminiAIProvider(model: gemModel).improveEnglish(
+                            userInput: userInput,
+                            context: context,
+                            recentHistory: recentHistory
+                        )
+                    } catch {
+                        print("DEBUG: Backup Gemini model \(gemModel) failed: \(error)...")
+                    }
+                }
+            }
+
+            // 3. If primary was Gemini and Groq has key, try Groq as backup
+            if provider.name != "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
+                do {
+                    return try await GroqAIProvider(model: "llama-3.3-70b-versatile").improveEnglish(
+                        userInput: userInput,
+                        context: context,
+                        recentHistory: recentHistory
+                    )
+                } catch {
+                    print("DEBUG: Fallback Groq failed: \(error)...")
+                }
+            }
+
+            throw error
+        }
     }
 
     func suggestNextWords(
@@ -55,17 +103,57 @@ final class AIService {
         context: String,
         lastQuestion: String? = nil
     ) async throws -> [String] {
-        try await provider.suggestNextWords(
-            currentInput: currentInput,
-            context: context,
-            lastQuestion: lastQuestion
-        )
+        do {
+            return try await provider.suggestNextWords(
+                currentInput: currentInput,
+                context: context,
+                lastQuestion: lastQuestion
+            )
+        } catch {
+            if provider.name == "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
+                if let res = try? await GroqAIProvider(model: "llama-3.3-70b-versatile").suggestNextWords(
+                    currentInput: currentInput,
+                    context: context,
+                    lastQuestion: lastQuestion
+                ) {
+                    return res
+                }
+            }
+            if !APIKeyStore.geminiAPIKey.isEmpty {
+                for gemModel in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] {
+                    if let res = try? await GeminiAIProvider(model: gemModel).suggestNextWords(
+                        currentInput: currentInput,
+                        context: context,
+                        lastQuestion: lastQuestion
+                    ) {
+                        return res
+                    }
+                }
+            }
+            throw error
+        }
     }
 
     func summarizeUserMistakes(
         samples: [UserMistakeSample]
     ) async throws -> AIMistakeSummaryResponse {
-        try await provider.summarizeUserMistakes(samples: samples)
+        do {
+            return try await provider.summarizeUserMistakes(samples: samples)
+        } catch {
+            if provider.name == "Groq" && !APIKeyStore.groqAPIKey.isEmpty {
+                if let res = try? await GroqAIProvider(model: "llama-3.3-70b-versatile").summarizeUserMistakes(samples: samples) {
+                    return res
+                }
+            }
+            if !APIKeyStore.geminiAPIKey.isEmpty {
+                for gemModel in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] {
+                    if let res = try? await GeminiAIProvider(model: gemModel).summarizeUserMistakes(samples: samples) {
+                        return res
+                    }
+                }
+            }
+            throw error
+        }
     }
 }
 

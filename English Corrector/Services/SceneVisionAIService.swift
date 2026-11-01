@@ -66,18 +66,30 @@ final class SceneVisionAIService {
     static let shared = SceneVisionAIService()
 
     private let session: URLSession
-    private let groqVisionModel: String
+
+    // Multi-tier Fallback Vision Models Chain
+    // 1. Groq Qwen (27B) -> 2. Groq Llama 3.2 (11B) -> 3. Groq Llama 3.2 (90B)
+    private let groqVisionModels: [String] = [
+        "qwen/qwen3.8-27b",
+        "meta-llama/llama-3.2-11b-vision-preview",
+        "meta-llama/llama-3.2-90b-vision-preview"
+    ]
+
+    // 4. Gemini 2.5 Flash -> 5. Gemini 2.0 Flash -> 6. Gemini 1.5 Flash
+    private let geminiVisionModels: [String] = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash"
+    ]
 
     init(
-        groqVisionModel: String = "qwen/qwen3.8-27b",
         session: URLSession = .shared
     ) {
-        self.groqVisionModel = groqVisionModel
         self.session = session
     }
 
-    /// Analyzes a photo using Groq Vision (qwen/qwen3.8-27b) with automatic fallback to Gemini.
-    /// By default `autoDetectObjects` is false, leaving item detection on-demand when the user clicks the button.
+    /// Analyzes a photo using resilient 5-tier AI chain:
+    /// Groq (Qwen -> Llama 3.2) -> Gemini (2.5 -> 2.0 -> 1.5) -> Apple Vision (Offline).
     func describeScene(
         imageData: Data,
         userPrompt: String? = nil,
@@ -90,38 +102,72 @@ final class SceneVisionAIService {
             preDetectedObjects = IOSObjectDetectorService.shared.scanAllObjectsInImage(from: uiImg)
         }
 
-        // 1. Try Groq Vision first
+        // 1. Try Groq Vision Models Chain
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
-            do {
-                return try await describeSceneWithGroq(
-                    imageData: imageData,
-                    userPrompt: userPrompt,
-                    preDetected: preDetectedObjects,
-                    autoDetectObjects: autoDetectObjects,
-                    apiKey: groqKey
-                )
-            } catch {
-                print("DEBUG: Groq Vision request failed: \(error). Falling back to Gemini Vision...")
+            for gModel in groqVisionModels {
+                do {
+                    return try await describeSceneWithGroq(
+                        imageData: imageData,
+                        userPrompt: userPrompt,
+                        preDetected: preDetectedObjects,
+                        autoDetectObjects: autoDetectObjects,
+                        model: gModel,
+                        apiKey: groqKey
+                    )
+                } catch {
+                    print("DEBUG: Groq Vision (\(gModel)) failed: \(error). Trying next model...")
+                }
             }
         }
 
-        // 2. Fallback to Gemini Vision
+        // 2. Try Gemini Vision Models Chain
         let geminiKey = APIKeyStore.geminiAPIKey
-        guard !geminiKey.isEmpty else {
-            throw AIServiceError.missingAPIKey(provider: "Groq", keyName: "GROQ_API_KEY")
+        if !geminiKey.isEmpty {
+            for gmModel in geminiVisionModels {
+                do {
+                    return try await describeSceneWithGemini(
+                        imageData: imageData,
+                        userPrompt: userPrompt,
+                        preDetected: preDetectedObjects,
+                        autoDetectObjects: autoDetectObjects,
+                        modelName: gmModel,
+                        apiKey: geminiKey
+                    )
+                } catch {
+                    print("DEBUG: Gemini Vision (\(gmModel)) failed: \(error). Trying next model...")
+                }
+            }
         }
 
-        return try await describeSceneWithGemini(
-            imageData: imageData,
-            userPrompt: userPrompt,
-            preDetected: preDetectedObjects,
-            autoDetectObjects: autoDetectObjects,
-            apiKey: geminiKey
+        // 3. Fallback to on-device detected summaries (Offline)
+        let offlineItems = preDetectedObjects.map { s in
+            let entry = EverydayVocabularyDictionary.lookup(identifier: s.word)
+            return AISceneObjectVocabularyItem(
+                word: entry?.word ?? s.word.capitalized,
+                phonetic: entry?.phonetic ?? "",
+                partOfSpeech: entry?.partOfSpeech ?? "Noun",
+                vietnameseMeaning: entry?.vietnamese ?? "Vật thể trong ảnh",
+                exampleInContext: "Nhận diện tức thì qua Apple Neural Engine [Offline]",
+                xPercent: s.xPercent,
+                yPercent: s.yPercent,
+                box2d: s.box2d,
+                isOffline: true
+            )
+        }
+        return AISceneDescriptionResponse(
+            sceneOverview: "A photo captured by your device.",
+            sceneVietnameseTranslation: "Ảnh được chụp từ thiết bị của bạn (Chế độ nhận diện ngoại tuyến).",
+            objectsDetected: offlineItems,
+            situationalConversationalPhrases: [
+                "What can you see in this photo?",
+                "Can you describe this scene in English?"
+            ],
+            adviceOrCulturalNote: "Hệ thống đang hoạt động ở chế độ ngoại tuyến qua Apple Neural Engine."
         )
     }
 
-    /// On-demand detection of all items in an image triggered by the user clicking "Nhận diện item trong ảnh"
+    /// On-demand detection of all items in an image using resilient 5-tier AI chain.
     func detectAllObjectsInImage(from image: UIImage) async throws -> [AISceneObjectVocabularyItem] {
         guard let jpegData = image.jpegData(compressionQuality: 0.8) else {
             return []
@@ -130,44 +176,51 @@ final class SceneVisionAIService {
         // 1. Apple Vision on-device scan
         let summaries = IOSObjectDetectorService.shared.scanAllObjectsInImage(from: image)
 
-        // 2. AI Multimodal Recognition
+        // 2. Try Groq Vision Chain
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
-            do {
-                let response = try await describeSceneWithGroq(
-                    imageData: jpegData,
-                    userPrompt: "Detect and identify the prominent physical items in this photo for an English vocabulary learner.",
-                    preDetected: summaries,
-                    autoDetectObjects: true,
-                    apiKey: groqKey
-                )
-                if !response.objectsDetected.isEmpty {
-                    return response.objectsDetected
+            for gModel in groqVisionModels {
+                do {
+                    let response = try await describeSceneWithGroq(
+                        imageData: jpegData,
+                        userPrompt: "Detect and identify the prominent physical items in this photo for an English vocabulary learner.",
+                        preDetected: summaries,
+                        autoDetectObjects: true,
+                        model: gModel,
+                        apiKey: groqKey
+                    )
+                    if !response.objectsDetected.isEmpty {
+                        return response.objectsDetected
+                    }
+                } catch {
+                    print("DEBUG: Groq detectAllObjectsInImage (\(gModel)) failed: \(error). Trying next model...")
                 }
-            } catch {
-                print("DEBUG: Groq detectAllObjectsInImage failed: \(error). Falling back to Gemini...")
             }
         }
 
+        // 3. Try Gemini Vision Chain
         let geminiKey = APIKeyStore.geminiAPIKey
         if !geminiKey.isEmpty {
-            do {
-                let response = try await describeSceneWithGemini(
-                    imageData: jpegData,
-                    userPrompt: "Detect and identify the prominent physical items in this photo for an English vocabulary learner.",
-                    preDetected: summaries,
-                    autoDetectObjects: true,
-                    apiKey: geminiKey
-                )
-                if !response.objectsDetected.isEmpty {
-                    return response.objectsDetected
+            for gmModel in geminiVisionModels {
+                do {
+                    let response = try await describeSceneWithGemini(
+                        imageData: jpegData,
+                        userPrompt: "Detect and identify the prominent physical items in this photo for an English vocabulary learner.",
+                        preDetected: summaries,
+                        autoDetectObjects: true,
+                        modelName: gmModel,
+                        apiKey: geminiKey
+                    )
+                    if !response.objectsDetected.isEmpty {
+                        return response.objectsDetected
+                    }
+                } catch {
+                    print("DEBUG: Gemini detectAllObjectsInImage (\(gmModel)) failed: \(error). Trying next model...")
                 }
-            } catch {
-                print("DEBUG: Gemini detectAllObjectsInImage failed: \(error)")
             }
         }
 
-        // 3. Fallback to on-device detected summaries with EverydayVocabularyDictionary (Offline)
+        // 4. Fallback to on-device detected summaries with EverydayVocabularyDictionary (Offline)
         let filtered = summaries.filter { summary in
             let w = summary.word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             return !w.isEmpty && w != "vật thể đã chọn"
@@ -192,29 +245,35 @@ final class SceneVisionAIService {
         }
     }
 
-    /// Analyzes an already detected and cropped object with multimodal AI.
+    /// Analyzes an already detected and cropped object with 5-tier AI chain.
     func identifyObject(from detected: IOSDetectedObjectResult) async throws -> AISceneObjectVocabularyItem {
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
-            do {
-                return try await identifyCroppedObjectWithGroq(
-                    detected: detected,
-                    apiKey: groqKey
-                )
-            } catch {
-                print("DEBUG: Groq cropped object analysis failed: \(error). Falling back to Gemini...")
+            for gModel in groqVisionModels {
+                do {
+                    return try await identifyCroppedObjectWithGroq(
+                        detected: detected,
+                        model: gModel,
+                        apiKey: groqKey
+                    )
+                } catch {
+                    print("DEBUG: Groq cropped object analysis (\(gModel)) failed: \(error). Trying next model...")
+                }
             }
         }
 
         let geminiKey = APIKeyStore.geminiAPIKey
         if !geminiKey.isEmpty {
-            do {
-                return try await identifyCroppedObjectWithGemini(
-                    detected: detected,
-                    apiKey: geminiKey
-                )
-            } catch {
-                print("DEBUG: Gemini cropped object analysis failed: \(error). Falling back to on-device offline recognition...")
+            for gmModel in geminiVisionModels {
+                do {
+                    return try await identifyCroppedObjectWithGemini(
+                        detected: detected,
+                        modelName: gmModel,
+                        apiKey: geminiKey
+                    )
+                } catch {
+                    print("DEBUG: Gemini cropped object analysis (\(gmModel)) failed: \(error). Trying next model...")
+                }
             }
         }
 
@@ -272,38 +331,60 @@ final class SceneVisionAIService {
 
         let groqKey = APIKeyStore.groqAPIKey
         if !groqKey.isEmpty {
-            do {
-                return try await identifyObjectAtPointWithGroq(
-                    imageData: imageData,
-                    xPercent: xPercent,
-                    yPercent: yPercent,
-                    apiKey: groqKey
-                )
-            } catch {
-                print("DEBUG: Groq point identification failed: \(error). Falling back to Gemini...")
+            for gModel in groqVisionModels {
+                do {
+                    return try await identifyObjectAtPointWithGroq(
+                        imageData: imageData,
+                        xPercent: xPercent,
+                        yPercent: yPercent,
+                        model: gModel,
+                        apiKey: groqKey
+                    )
+                } catch {
+                    print("DEBUG: Groq point identification (\(gModel)) failed: \(error). Trying next model...")
+                }
             }
         }
 
         let geminiKey = APIKeyStore.geminiAPIKey
-        guard !geminiKey.isEmpty else {
-            throw AIServiceError.missingAPIKey(provider: "Groq", keyName: "GROQ_API_KEY")
+        if !geminiKey.isEmpty {
+            for gmModel in geminiVisionModels {
+                do {
+                    return try await identifyObjectAtPointWithGemini(
+                        imageData: imageData,
+                        xPercent: xPercent,
+                        yPercent: yPercent,
+                        modelName: gmModel,
+                        apiKey: geminiKey
+                    )
+                } catch {
+                    print("DEBUG: Gemini point identification (\(gmModel)) failed: \(error). Trying next model...")
+                }
+            }
         }
 
-        return try await identifyObjectAtPointWithGemini(
-            imageData: imageData,
+        // On-Device Fallback
+        return AISceneObjectVocabularyItem(
+            word: "Object",
+            phonetic: "",
+            partOfSpeech: "Noun",
+            vietnameseMeaning: "Vật thể trong ảnh",
+            exampleInContext: "Nhận diện tức thì qua Apple Neural Engine [Offline]",
             xPercent: xPercent,
             yPercent: yPercent,
-            apiKey: geminiKey
+            box2d: nil,
+            isOffline: true
         )
     }
 
-    // MARK: - Groq Vision Implementation (qwen/qwen3.8-27b)
+    // MARK: - Groq Vision Implementation
 
     private func describeSceneWithGroq(
         imageData: Data,
         userPrompt: String?,
         preDetected: [IOSDetectedObjectSummary] = [],
         autoDetectObjects: Bool = false,
+        model: String = "qwen/qwen3.8-27b",
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
@@ -361,7 +442,7 @@ final class SceneVisionAIService {
         }
 
         let requestPayload: [String: Any] = [
-            "model": groqVisionModel,
+            "model": model,
             "messages": [
                 [
                     "role": "system",
@@ -434,6 +515,7 @@ final class SceneVisionAIService {
         imageData: Data,
         xPercent: Double,
         yPercent: Double,
+        model: String = "qwen/qwen3.8-27b",
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
         let processedData = optimizeImageForVision(imageData: imageData)
@@ -463,7 +545,7 @@ final class SceneVisionAIService {
         let promptText = "What is the specific object at coordinate (\(roundedX)%, \(roundedY)%) in this image? Provide its English vocabulary, IPA, Vietnamese meaning, and context sentence."
 
         let requestPayload: [String: Any] = [
-            "model": groqVisionModel,
+            "model": model,
             "messages": [
                 [
                     "role": "system",
@@ -561,6 +643,7 @@ final class SceneVisionAIService {
 
     private func identifyCroppedObjectWithGroq(
         detected: IOSDetectedObjectResult,
+        model: String = "qwen/qwen3.8-27b",
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
         let processedData = prepareCleanCutoutOrCroppedData(from: detected)
@@ -593,7 +676,7 @@ final class SceneVisionAIService {
         let promptText = "Identify the main object in this cropped photo. Provide its English vocabulary, IPA pronunciation, Vietnamese meaning, and an example sentence."
 
         let requestPayload: [String: Any] = [
-            "model": groqVisionModel,
+            "model": model,
             "messages": [
                 [
                     "role": "system",
@@ -678,13 +761,14 @@ final class SceneVisionAIService {
         )
     }
 
-    // MARK: - Gemini Vision Fallback (gemini-2.5-flash)
+    // MARK: - Gemini Vision Fallback
 
     private func describeSceneWithGemini(
         imageData: Data,
         userPrompt: String?,
         preDetected: [IOSDetectedObjectSummary] = [],
         autoDetectObjects: Bool = false,
+        modelName: String = "gemini-2.5-flash",
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
@@ -745,7 +829,7 @@ final class SceneVisionAIService {
         )
 
         guard let endpoint = URL(
-            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent"
         ) else {
             throw URLError(.badURL)
         }
@@ -789,6 +873,7 @@ final class SceneVisionAIService {
         imageData: Data,
         xPercent: Double,
         yPercent: Double,
+        modelName: String = "gemini-2.5-flash",
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
         let processedData = optimizeImageForVision(imageData: imageData)
@@ -840,7 +925,7 @@ final class SceneVisionAIService {
         )
 
         guard let endpoint = URL(
-            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent"
         ) else {
             throw URLError(.badURL)
         }
@@ -893,6 +978,7 @@ final class SceneVisionAIService {
 
     private func identifyCroppedObjectWithGemini(
         detected: IOSDetectedObjectResult,
+        modelName: String = "gemini-2.5-flash",
         apiKey: String
     ) async throws -> AISceneObjectVocabularyItem {
         let processedData = prepareCleanCutoutOrCroppedData(from: detected)
@@ -947,7 +1033,7 @@ final class SceneVisionAIService {
         )
 
         guard let endpoint = URL(
-            string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent"
         ) else {
             throw URLError(.badURL)
         }
