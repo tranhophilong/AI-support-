@@ -56,9 +56,7 @@ struct UserBubble: View {
 
                 if let imageData, let uiImage = UIImage(data: imageData) {
                     Button {
-                        if sceneForImage != nil {
-                            showViewer = true
-                        }
+                        showViewer = true
                     } label: {
                         ZStack(alignment: .bottomTrailing) {
                             Image(uiImage: uiImage)
@@ -71,33 +69,37 @@ struct UserBubble: View {
                                         .strokeBorder(AppTheme.Surface.border, lineWidth: 0.5)
                                 }
 
-                            if sceneForImage != nil {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "hand.tap.fill")
-                                        .font(.system(size: 9))
-                                    Text("Xem từ vựng")
-                                        .font(.system(size: 10, weight: .bold))
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(AppTheme.Neutral.n900.opacity(0.8))
-                                .clipShape(Capsule())
-                                .padding(6)
+                            HStack(spacing: 4) {
+                                Image(systemName: "camera.viewfinder")
+                                    .font(.system(size: 9))
+                                Text(sceneForImage?.objectsDetected.isEmpty == false
+                                     ? "Từ vựng (\(sceneForImage!.objectsDetected.count))"
+                                     : "Nhận diện item")
+                                    .font(.system(size: 10, weight: .bold))
                             }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(AppTheme.Neutral.n900.opacity(0.8))
+                            .clipShape(Capsule())
+                            .padding(6)
                         }
                     }
                     .buttonStyle(.plain)
                     .fullScreenCover(isPresented: $showViewer) {
-                        if let scene = sceneForImage {
-                            InteractiveSceneImageViewerSheet(
-                                image: uiImage,
-                                scene: scene,
-                                onSaveWord: onSaveWord,
-                                isWordSaved: isWordSaved,
-                                onUpdateScene: onUpdateScene
-                            )
-                        }
+                        InteractiveSceneImageViewerSheet(
+                            image: uiImage,
+                            scene: sceneForImage ?? AISceneDescriptionResponse(
+                                sceneOverview: "Ảnh tải lên",
+                                sceneVietnameseTranslation: "Ảnh tải lên",
+                                objectsDetected: [],
+                                situationalConversationalPhrases: [],
+                                adviceOrCulturalNote: nil
+                            ),
+                            onSaveWord: onSaveWord,
+                            isWordSaved: isWordSaved,
+                            onUpdateScene: onUpdateScene
+                        )
                     }
                 }
 

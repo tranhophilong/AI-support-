@@ -203,6 +203,8 @@ struct SceneDescriptionCardView: View {
             overviewSection
             if !scene.objectsDetected.isEmpty {
                 objectsSection
+            } else if imageData != nil {
+                detectItemsQuickButton
             }
             if !scene.situationalConversationalPhrases.isEmpty {
                 phrasesSection
@@ -222,6 +224,51 @@ struct SceneDescriptionCardView: View {
 
     // MARK: - Subviews
 
+    private var detectItemsQuickButton: some View {
+        Button {
+            showInteractiveViewer = true
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.Accent.a500.opacity(0.15))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(AppTheme.Accent.a600)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Nhận diện item trong ảnh")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(AppTheme.Neutral.n900)
+                    Text("Bấm để khám phá từ vựng theo vị trí các vật thể")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.Neutral.n500)
+                }
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    Text("Mở ảnh")
+                        .font(.caption.bold())
+                        .foregroundStyle(AppTheme.Primary.p500)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.bold())
+                        .foregroundStyle(AppTheme.Primary.p500)
+                }
+            }
+            .padding(10)
+            .background(AppTheme.Surface.card)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(AppTheme.Accent.a500.opacity(0.3), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private func photoBannerSection(uiImage: UIImage) -> some View {
         Button {
             showInteractiveViewer = true
@@ -239,9 +286,12 @@ struct SceneDescriptionCardView: View {
                     }
 
                 HStack(spacing: 6) {
-                    Image(systemName: "hand.tap.fill")
+                    Image(systemName: "camera.viewfinder")
                         .font(.caption2.bold())
-                    Text("Bấm vào ảnh xem từ vựng bên cạnh đồ vật (\(scene.objectsDetected.count))")
+                        .foregroundStyle(AppTheme.Semantic.warning)
+                    Text(scene.objectsDetected.isEmpty
+                         ? "Nhận diện item trong ảnh"
+                         : "Xem từ vựng theo đồ vật (\(scene.objectsDetected.count))")
                         .font(.caption2.bold())
                 }
                 .foregroundStyle(.white)
@@ -471,6 +521,7 @@ struct InteractiveSceneImageViewerSheet: View {
 
     // Long-Press AI Object Detection States
     @State private var isDetectingObject: Bool = false
+    @State private var isScanningAllItems: Bool = false
     @State private var detectingPoint: CGPoint? = nil
     @State private var detectionErrorMessage: String? = nil
     @State private var hasTriggeredLongPress: Bool = false
@@ -587,7 +638,7 @@ struct InteractiveSceneImageViewerSheet: View {
                             }
                         }
                         .gesture(
-                            LongPressGesture(minimumDuration: 0.45)
+                            LongPressGesture(minimumDuration: 0.35)
                                 .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                                 .onChanged { value in
                                     switch value {
@@ -674,25 +725,64 @@ struct InteractiveSceneImageViewerSheet: View {
                 .scaleEffect(scale)
                 .offset(offset)
 
-                // Hint Pill: "Nhấn đè vào đồ vật để AI nhận diện thêm"
-                if !isDetectingObject && currentScene.objectsDetected.count < 15 {
-                    VStack {
-                        HStack(spacing: 5) {
-                            Image(systemName: "hand.tap.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(AppTheme.Accent.a600)
-                            Text("Nhấn đè vào đồ vật bất kỳ để AI nhận diện thêm")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.white.opacity(0.85))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.65))
-                        .clipShape(Capsule())
-                        .overlay {
-                            Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
+                // Action Banner: Button "Nhận diện item trong ảnh" & Helper Hint
+                if !isDetectingObject {
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Button {
+                                detectAllItems()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if isScanningAllItems {
+                                        ProgressView()
+                                            .scaleEffect(0.65)
+                                            .tint(.white)
+                                        Text("Đang nhận diện các item...")
+                                            .font(.system(size: 11, weight: .bold))
+                                    } else {
+                                        Image(systemName: "camera.viewfinder")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(AppTheme.Semantic.warning)
+                                        Text("Nhận diện item trong ảnh")
+                                            .font(.system(size: 12, weight: .bold))
+                                    }
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(Color.black.opacity(0.85))
+                                .clipShape(Capsule())
+                                .overlay {
+                                    Capsule()
+                                        .strokeBorder(AppTheme.Semantic.warning.opacity(0.85), lineWidth: 1)
+                                }
+                                .shadow(color: .black.opacity(0.5), radius: 5)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isScanningAllItems)
+
+                            if !currentScene.objectsDetected.isEmpty {
+                                toggleLabelsButton
+                            }
                         }
                         .padding(.top, 10)
+
+                        if !isScanningAllItems {
+                            HStack(spacing: 5) {
+                                Image(systemName: "hand.tap.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(AppTheme.Accent.a500)
+                                Text(currentScene.objectsDetected.isEmpty
+                                     ? "Bấm nút trên để nhận diện tất cả, hoặc nhấn đè vào đồ vật bất kỳ"
+                                     : "Nhấn đè vào đồ vật bất kỳ để AI nhận diện thêm")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.white.opacity(0.85))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Capsule())
+                        }
 
                         Spacer()
                     }
@@ -850,38 +940,86 @@ struct InteractiveSceneImageViewerSheet: View {
     }
 
     private var detectingRadarView: some View {
-        ZStack {
-            Circle()
-                .stroke(AppTheme.Semantic.warning, lineWidth: 2)
-                .frame(width: 48, height: 48)
-                .scaleEffect(pulse ? 1.35 : 0.85)
-                .opacity(pulse ? 0.25 : 0.85)
+        TimelineView(.animation) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let phase = CGFloat(time * 120).truncatingRemainder(dividingBy: 100)
 
-            Circle()
-                .strokeBorder(Color.white, lineWidth: 2)
-                .frame(width: 22, height: 22)
+            ZStack {
+                // Running circular laser pulse around the touch point
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                AppTheme.Semantic.warning.opacity(0.2),
+                                AppTheme.Semantic.warning,
+                                .white,
+                                AppTheme.Semantic.warning
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        style: StrokeStyle(lineWidth: 2.8, dash: [18, 12], dashPhase: -phase)
+                    )
+                    .frame(width: 52, height: 52)
+                    .shadow(color: AppTheme.Semantic.warning.opacity(0.85), radius: 6)
 
-            ProgressView()
-                .scaleEffect(0.65)
-                .tint(.white)
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5)
+                    .frame(width: 22, height: 22)
 
-            HStack(spacing: 5) {
-                Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 8, weight: .bold))
-                Text("Apple Vision & AI...")
-                    .font(.system(size: 9, weight: .bold))
+                ProgressView()
+                    .scaleEffect(0.65)
+                    .tint(.white)
+
+                HStack(spacing: 5) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 8, weight: .bold))
+                    Text("Đang bóc tách viền...")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.88))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(AppTheme.Semantic.warning.opacity(0.7), lineWidth: 0.5)
+                }
+                .shadow(radius: 4)
+                .offset(y: -36)
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.black.opacity(0.88))
-            .clipShape(Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(AppTheme.Semantic.warning.opacity(0.7), lineWidth: 0.5)
+        }
+    }
+
+    private func detectAllItems() {
+        guard !isScanningAllItems else { return }
+        isScanningAllItems = true
+        detectionErrorMessage = nil
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        Task {
+            do {
+                let items = try await SceneVisionAIService.shared.detectAllObjectsInImage(from: image)
+                await MainActor.run {
+                    isScanningAllItems = false
+                    if items.isEmpty {
+                        detectionErrorMessage = "Không tìm thấy đồ vật rõ nét nào trong ảnh."
+                    } else {
+                        currentScene.objectsDetected = items
+                        selectedObject = items.first
+                        showAllLabels = true
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        onUpdateScene?(currentScene)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isScanningAllItems = false
+                    detectionErrorMessage = "Lỗi nhận diện: \(error.localizedDescription)"
+                }
             }
-            .shadow(radius: 4)
-            .offset(y: -32)
         }
     }
 
@@ -1414,11 +1552,112 @@ struct LiftedCropState: Equatable, Identifiable {
     var contourLoops: [[CGPoint]] = []
 }
 
+struct RunningContourLaserBorderView: View {
+    let loops: [[CGPoint]]
+    let accentColor: Color
+
+    var body: some View {
+        TimelineView(.animation) { (context: TimelineViewDefaultContext) in
+            borderContent(at: context.date)
+        }
+    }
+
+    @ViewBuilder
+    private func borderContent(at date: Date) -> some View {
+        let time = date.timeIntervalSinceReferenceDate
+        let phase = CGFloat(time * 120).truncatingRemainder(dividingBy: 140)
+        let secPhase = CGFloat(time * 70).truncatingRemainder(dividingBy: 140)
+
+        ZStack {
+            if !loops.isEmpty {
+                ContourSilhouettePathShape(loops: loops)
+                    .stroke(accentColor.opacity(0.3), lineWidth: 1.5)
+
+                ContourSilhouettePathShape(loops: loops)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                accentColor.opacity(0.2),
+                                accentColor,
+                                .white,
+                                AppTheme.Accent.a500,
+                                accentColor.opacity(0.2)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        style: StrokeStyle(
+                            lineWidth: 3.5,
+                            lineCap: .round,
+                            lineJoin: .round,
+                            dash: [42, 28],
+                            dashPhase: -phase
+                        )
+                    )
+                    .shadow(color: accentColor.opacity(0.95), radius: 8, x: 0, y: 0)
+                    .shadow(color: .white.opacity(0.9), radius: 3, x: 0, y: 0)
+
+                ContourSilhouettePathShape(loops: loops)
+                    .stroke(
+                        Color.white,
+                        style: StrokeStyle(
+                            lineWidth: 2.2,
+                            lineCap: .round,
+                            lineJoin: .round,
+                            dash: [14, 56],
+                            dashPhase: -secPhase
+                        )
+                    )
+                    .shadow(color: .white, radius: 4)
+            } else {
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(accentColor.opacity(0.3), lineWidth: 1.5)
+
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                accentColor.opacity(0.2),
+                                accentColor,
+                                .white,
+                                AppTheme.Accent.a500,
+                                accentColor.opacity(0.2)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        style: StrokeStyle(
+                            lineWidth: 3.5,
+                            lineCap: .round,
+                            lineJoin: .round,
+                            dash: [42, 28],
+                            dashPhase: -phase
+                        )
+                    )
+                    .shadow(color: accentColor.opacity(0.95), radius: 8, x: 0, y: 0)
+                    .shadow(color: .white.opacity(0.9), radius: 3, x: 0, y: 0)
+
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(
+                        Color.white,
+                        style: StrokeStyle(
+                            lineWidth: 2.2,
+                            lineCap: .round,
+                            lineJoin: .round,
+                            dash: [14, 56],
+                            dashPhase: -secPhase
+                        )
+                    )
+                    .shadow(color: .white, radius: 4)
+            }
+        }
+    }
+}
+
 struct LiftedCropObjectOverlayView: View {
     let cropState: LiftedCropState
     let accentColor: Color
 
-    @State private var shimmerPhase: CGFloat = -1.2
     @State private var pulseGlow: Bool = false
 
     var body: some View {
@@ -1431,64 +1670,14 @@ struct LiftedCropObjectOverlayView: View {
                 .scaledToFill()
                 .frame(width: max(20, cropState.rect.width), height: max(20, cropState.rect.height))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                // 2. Exact Detected Contour Silhouette Outline (tracing the real object curves & corners)
+                // 2. High-Tech Animated Laser Border RUNNING AROUND THE ITEM
                 .overlay {
-                    if !cropState.contourLoops.isEmpty {
-                        ContourSilhouettePathShape(loops: cropState.contourLoops)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [
-                                        accentColor,
-                                        .white,
-                                        AppTheme.Primary.p300,
-                                        accentColor
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                style: StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round)
-                            )
-                            .shadow(color: accentColor.opacity(pulseGlow ? 0.9 : 0.45), radius: 8, x: 0, y: 0)
-                            .shadow(color: .white.opacity(0.85), radius: 3, x: 0, y: 0)
-                    } else {
-                        // Smooth rounded contour boundary fallback
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        accentColor,
-                                        .white,
-                                        AppTheme.Primary.p300,
-                                        accentColor
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: cropState.isLifted ? 2.5 : 1.5
-                            )
-                    }
+                    RunningContourLaserBorderView(
+                        loops: cropState.contourLoops,
+                        accentColor: accentColor
+                    )
                 }
-                // 3. Scanning light sweep across the object
-                .overlay {
-                    GeometryReader { geo in
-                        Rectangle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        .clear,
-                                        Color.white.opacity(0.45),
-                                        .clear
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .rotationEffect(.degrees(25))
-                            .offset(x: shimmerPhase * geo.size.width)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                    }
-                }
-                // 4. Viewfinder Corner Brackets
+                // 3. Viewfinder Corner Brackets
                 .overlay {
                     ViewfinderCornerBracketsView(color: accentColor)
                         .padding(-3)
@@ -1540,9 +1729,6 @@ struct LiftedCropObjectOverlayView: View {
         }
         .position(x: cropState.rect.midX, y: cropState.rect.midY)
         .onAppear {
-            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
-                shimmerPhase = 1.2
-            }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 pulseGlow = true
             }

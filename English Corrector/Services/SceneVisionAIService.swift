@@ -77,14 +77,16 @@ final class SceneVisionAIService {
     }
 
     /// Analyzes a photo using Groq Vision (qwen/qwen3.8-27b) with automatic fallback to Gemini.
+    /// By default `autoDetectObjects` is false, leaving item detection on-demand when the user clicks the button.
     func describeScene(
         imageData: Data,
-        userPrompt: String? = nil
+        userPrompt: String? = nil,
+        autoDetectObjects: Bool = false
     ) async throws -> AISceneDescriptionResponse {
 
-        // 0. Pre-detect objects on-device with Apple Vision Neural Engine first
+        // 0. Pre-detect objects on-device with Apple Vision Neural Engine ONLY IF autoDetectObjects is requested
         var preDetectedObjects: [IOSDetectedObjectSummary] = []
-        if let uiImg = UIImage(data: imageData) {
+        if autoDetectObjects, let uiImg = UIImage(data: imageData) {
             preDetectedObjects = IOSObjectDetectorService.shared.scanAllObjectsInImage(from: uiImg)
         }
 
@@ -96,6 +98,7 @@ final class SceneVisionAIService {
                     imageData: imageData,
                     userPrompt: userPrompt,
                     preDetected: preDetectedObjects,
+                    autoDetectObjects: autoDetectObjects,
                     apiKey: groqKey
                 )
             } catch {
@@ -113,8 +116,70 @@ final class SceneVisionAIService {
             imageData: imageData,
             userPrompt: userPrompt,
             preDetected: preDetectedObjects,
+            autoDetectObjects: autoDetectObjects,
             apiKey: geminiKey
         )
+    }
+
+    /// On-demand detection of all items in an image triggered by the user clicking "Nhận diện item trong ảnh"
+    func detectAllObjectsInImage(from image: UIImage) async throws -> [AISceneObjectVocabularyItem] {
+        guard let jpegData = image.jpegData(compressionQuality: 0.8) else {
+            return []
+        }
+
+        // 1. Apple Vision on-device scan
+        let summaries = IOSObjectDetectorService.shared.scanAllObjectsInImage(from: image)
+
+        // 2. AI Multimodal Recognition
+        let groqKey = APIKeyStore.groqAPIKey
+        if !groqKey.isEmpty {
+            do {
+                let response = try await describeSceneWithGroq(
+                    imageData: jpegData,
+                    userPrompt: "Detect and identify the prominent physical items in this photo for an English vocabulary learner.",
+                    preDetected: summaries,
+                    autoDetectObjects: true,
+                    apiKey: groqKey
+                )
+                if !response.objectsDetected.isEmpty {
+                    return response.objectsDetected
+                }
+            } catch {
+                print("DEBUG: Groq detectAllObjectsInImage failed: \(error). Falling back to Gemini...")
+            }
+        }
+
+        let geminiKey = APIKeyStore.geminiAPIKey
+        if !geminiKey.isEmpty {
+            do {
+                let response = try await describeSceneWithGemini(
+                    imageData: jpegData,
+                    userPrompt: "Detect and identify the prominent physical items in this photo for an English vocabulary learner.",
+                    preDetected: summaries,
+                    autoDetectObjects: true,
+                    apiKey: geminiKey
+                )
+                if !response.objectsDetected.isEmpty {
+                    return response.objectsDetected
+                }
+            } catch {
+                print("DEBUG: Gemini detectAllObjectsInImage failed: \(error)")
+            }
+        }
+
+        // 3. Fallback to on-device detected summaries
+        return summaries.map { summary in
+            AISceneObjectVocabularyItem(
+                word: summary.word.capitalized,
+                phonetic: "",
+                partOfSpeech: "Noun",
+                vietnameseMeaning: "Vật thể trong ảnh",
+                exampleInContext: "",
+                xPercent: summary.xPercent,
+                yPercent: summary.yPercent,
+                box2d: summary.box2d
+            )
+        }
     }
 
     /// Analyzes an already detected and cropped object with multimodal AI.
@@ -206,6 +271,7 @@ final class SceneVisionAIService {
         imageData: Data,
         userPrompt: String?,
         preDetected: [IOSDetectedObjectSummary] = [],
+        autoDetectObjects: Bool = false,
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
@@ -213,12 +279,12 @@ final class SceneVisionAIService {
         let base64String = processedData.base64EncodedString()
         let dataUri = "data:image/jpeg;base64,\(base64String)"
 
-        let preDetectedBlock = preDetected.isEmpty ? "" : """
+        let preDetectedBlock = (autoDetectObjects && !preDetected.isEmpty) ? """
 
         The device Neural Engine identified \(preDetected.count) key visual regions of interest in this image:
         \(preDetected.map { "- Region at coordinates (\(Int($0.xPercent))%, \(Int($0.yPercent))%), bbox: \($0.box2d)" }.joined(separator: "\n"))
         Please inspect what is physically at each of these coordinates, identify the exact English object name, and include them in your objectsDetected array.
-        """
+        """ : ""
 
         let systemInstruction = """
         You are an expert English language coach analyzing real-world camera photos to help Vietnamese learners discover English vocabulary, natural descriptive sentences, and conversational expressions.
@@ -244,21 +310,22 @@ final class SceneVisionAIService {
           ],
           "adviceOrCulturalNote": "Brief tip in Vietnamese about vocabulary nuance or cultural communication in this setting."
         }
-        CRITICAL ACCURACY REQUIREMENT FOR OBJECT TARGETING:
-        For every object detected, you MUST pinpoint its exact location:
-        - "point": [x, y] is the EXACT physical center of that object on the image, where x is percentage (0-100) from left to right, and y is percentage (0-100) from top to bottom.
-        - "box_2d": [ymin, xmin, ymax, xmax] is the bounding box coordinates on a 0-1000 scale.
-        Be extremely precise so the leader pointer points directly at the object.
+        CRITICAL REQUIREMENT:
+        \(autoDetectObjects
+          ? "Identify 3 to 6 prominent physical objects clearly visible in the image, pinpointing their exact center point [x, y] (0-100 scale) and box_2d."
+          : "Keep 'objectsDetected' as an empty array [] since the user will manually trigger object detection on demand. Focus on providing a vivid sceneOverview and situational conversational phrases.")
         """ + preDetectedBlock
 
         let promptText: String
         if let userPrompt, !userPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             promptText = """
             User focus or question: "\(userPrompt)"
-            Please analyze this image, address the user focus, identify 4 to 8 key objects with phonetic IPA and Vietnamese meanings, and provide situational phrases.
+            Please analyze this image, address the user focus, and provide situational phrases. \(autoDetectObjects ? "Also identify key objects." : "Leave objectsDetected empty [].")
             """
         } else {
-            promptText = "Please analyze this image, describe the scene in English with Vietnamese translation, identify 4 to 8 key objects with IPA and Vietnamese meanings, and provide practical conversational phrases."
+            promptText = autoDetectObjects
+                ? "Please analyze this image, describe the scene in English with Vietnamese translation, identify key objects with IPA and Vietnamese meanings, and provide practical conversational phrases."
+                : "Please analyze this image, describe the scene in English with Vietnamese translation, and provide practical conversational phrases. Keep objectsDetected as []."
         }
 
         let requestPayload: [String: Any] = [
@@ -556,18 +623,19 @@ final class SceneVisionAIService {
         imageData: Data,
         userPrompt: String?,
         preDetected: [IOSDetectedObjectSummary] = [],
+        autoDetectObjects: Bool = false,
         apiKey: String
     ) async throws -> AISceneDescriptionResponse {
 
         let processedData = optimizeImageForVision(imageData: imageData)
         let base64String = processedData.base64EncodedString()
 
-        let preDetectedBlock = preDetected.isEmpty ? "" : """
+        let preDetectedBlock = (autoDetectObjects && !preDetected.isEmpty) ? """
 
         The device Neural Engine identified \(preDetected.count) key visual regions of interest in this image:
         \(preDetected.map { "- Region at coordinates (\(Int($0.xPercent))%, \(Int($0.yPercent))%), bbox: \($0.box2d)" }.joined(separator: "\n"))
         Please inspect what is physically at each of these coordinates, identify the exact English object name, and include them in your objectsDetected array.
-        """
+        """ : ""
 
         let systemInstruction = """
         You are an expert English language coach analyzing real-world camera photos to help Vietnamese learners discover English vocabulary, natural descriptive sentences, and conversational expressions.
@@ -575,15 +643,7 @@ final class SceneVisionAIService {
         Always respond with valid JSON matching the required schema:
         - "sceneOverview": A natural, engaging 2-3 sentence English description of what is in the scene (what is happening, the environment, key elements).
         - "sceneVietnameseTranslation": Accurate, natural Vietnamese translation of the scene overview.
-        - "objectsDetected": 4 to 8 prominent objects, items, or notable elements detected in the photo. Each object must have:
-          * "word": The English noun or noun phrase (e.g., "laptop stand", "espresso cup", "potted succulent", "traffic light").
-          * "box_2d": [ymin, xmin, ymax, xmax] on a 0-1000 scale pinpointing the exact location of the object.
-          * "xPercent": Approximate horizontal center location of the object in percentage from 0 (left) to 100 (right).
-          * "yPercent": Approximate vertical center location of the object in percentage from 0 (top) to 100 (bottom).
-          * "phonetic": Accurate IPA pronunciation (e.g., "/ˈlæp.tɒp stænd/").
-          * "partOfSpeech": Part of speech (e.g., "Noun", "Compound Noun").
-          * "vietnameseMeaning": Clear, accurate Vietnamese meaning (e.g., "giá đỡ máy tính xách tay").
-          * "exampleInContext": A short, practical English sentence using this word in the context of the photo.
+        - "objectsDetected": \(autoDetectObjects ? "3 to 6 prominent objects, items, or notable elements detected in the photo." : "Keep as empty array [] by default since the user will manually trigger object detection.")
         - "situationalConversationalPhrases": 2 to 4 natural conversational English phrases or questions someone might say in this situation/setting.
         - "adviceOrCulturalNote": A helpful brief tip in Vietnamese about vocabulary nuance or cultural communication in this setting.
         """ + preDetectedBlock
@@ -592,10 +652,12 @@ final class SceneVisionAIService {
         if let userPrompt, !userPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             promptText = """
             User's specific focus or question regarding this image: "\(userPrompt)"
-            Please analyze the image with special attention to the user's question, while still providing the comprehensive learning breakdown (scene overview, detected objects vocabulary, and conversational phrases).
+            Please analyze the image with special attention to the user's question, while still providing the scene overview and conversational phrases. \(autoDetectObjects ? "Identify key objects." : "Keep objectsDetected as [].")
             """
         } else {
-            promptText = "Please analyze this image, describe the scene, identify key objects for an English learner, and provide practical conversational phrases."
+            promptText = autoDetectObjects
+                ? "Please analyze this image, describe the scene, identify key objects for an English learner, and provide practical conversational phrases."
+                : "Please analyze this image, describe the scene, and provide practical conversational phrases. Keep objectsDetected as []."
         }
 
         let body = GeminiVisionContentRequest(
