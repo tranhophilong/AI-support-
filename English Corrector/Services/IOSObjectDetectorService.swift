@@ -84,9 +84,10 @@ final class IOSObjectDetectorService: Sendable {
     ]
 
     /// Detects the specific physical object at (xPercent, yPercent) in accordance with Apple's Vision Object Detection guidelines.
-    /// Handles small items accurately even when zoomed out, isolating them from surrounding items.
+    /// Supports user-drawn custom bounding boxes (lasso/swipe gesture around an item) to crop and cutoff with pixel precision.
     func detectAndCropObject(
         from image: UIImage,
+        inCustomBoxPercent customBox: CGRect? = nil,
         atXPercent xPercent: Double,
         yPercent: Double
     ) async throws -> IOSDetectedObjectResult {
@@ -109,7 +110,7 @@ final class IOSObjectDetectorService: Sendable {
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
 
         // 2. High-precision instance segmentation (iOS 17+)
-        // Directly isolate the targeted small object at (clampedX, clampedY) from any surrounding clutter
+        // Directly isolate the targeted object at (clampedX, clampedY) or within user-swiped customBox
         if #available(iOS 17.0, *) {
             let maskRequest = VNGenerateForegroundInstanceMaskRequest()
             if (try? handler.perform([maskRequest])) != nil,
@@ -192,6 +193,91 @@ final class IOSObjectDetectorService: Sendable {
                         }
                     }
                 }
+            }
+        }
+
+        // If user swiped around a specific region, directly prioritize the user's circled box
+        if let customBox = customBox {
+            let uiBox = CGRect(
+                x: max(0.0, min(0.96, customBox.minX / 100.0)),
+                y: max(0.0, min(0.96, customBox.minY / 100.0)),
+                width: max(0.03, min(1.0, customBox.width / 100.0)),
+                height: max(0.03, min(1.0, customBox.height / 100.0))
+            )
+
+            let padX = uiBox.width * 0.10
+            let padY = uiBox.height * 0.10
+            let pMinX = max(0.0, uiBox.minX - padX)
+            let pMinY = max(0.0, uiBox.minY - padY)
+            let pMaxX = min(1.0, uiBox.maxX + padX)
+            let pMaxY = min(1.0, uiBox.maxY + padY)
+
+            let paddedBox = CGRect(
+                x: pMinX,
+                y: pMinY,
+                width: max(0.04, pMaxX - pMinX),
+                height: max(0.04, pMaxY - pMinY)
+            )
+
+            let pixelRect = CGRect(
+                x: paddedBox.origin.x * imageWidth,
+                y: paddedBox.origin.y * imageHeight,
+                width: paddedBox.size.width * imageWidth,
+                height: paddedBox.size.height * imageHeight
+            ).integral
+
+            if let croppedCG = cgImage.cropping(to: pixelRect) {
+                let croppedUIImage = UIImage(cgImage: croppedCG)
+                let jpegData = croppedUIImage.jpegData(compressionQuality: 0.85) ?? Data()
+                let contourLoops = extractContourLoops(for: croppedCG)
+                let (cutoutImage, cutoutMetrics) = extractForegroundCutout(for: croppedCG)
+                let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: nil)
+
+                let finalCenterPercent: CGPoint
+                let finalBoundingBoxPercent: CGRect
+
+                if let metrics = cutoutMetrics {
+                    finalCenterPercent = CGPoint(
+                        x: max(2.0, min(98.0, (paddedBox.minX + metrics.center.x * paddedBox.width) * 100.0)),
+                        y: max(2.0, min(98.0, (paddedBox.minY + metrics.center.y * paddedBox.height) * 100.0))
+                    )
+                    finalBoundingBoxPercent = CGRect(
+                        x: (paddedBox.minX + metrics.bounds.minX * paddedBox.width) * 100.0,
+                        y: (paddedBox.minY + metrics.bounds.minY * paddedBox.height) * 100.0,
+                        width: max(2.0, metrics.bounds.width * paddedBox.width * 100.0),
+                        height: max(2.0, metrics.bounds.height * paddedBox.height * 100.0)
+                    )
+                } else {
+                    finalCenterPercent = CGPoint(
+                        x: max(2.0, min(98.0, uiBox.midX * 100.0)),
+                        y: max(2.0, min(98.0, uiBox.midY * 100.0))
+                    )
+                    finalBoundingBoxPercent = CGRect(
+                        x: uiBox.origin.x * 100.0,
+                        y: uiBox.origin.y * 100.0,
+                        width: uiBox.size.width * 100.0,
+                        height: uiBox.size.height * 100.0
+                    )
+                }
+
+                let paddedBoxPercent = CGRect(
+                    x: paddedBox.origin.x * 100.0,
+                    y: paddedBox.origin.y * 100.0,
+                    width: paddedBox.size.width * 100.0,
+                    height: paddedBox.size.height * 100.0
+                )
+
+                return IOSDetectedObjectResult(
+                    croppedImage: croppedUIImage,
+                    cutoutImage: cutoutImage,
+                    croppedImageData: jpegData,
+                    refinedCenterPercent: finalCenterPercent,
+                    boundingBoxPercent: finalBoundingBoxPercent,
+                    paddedBoxPercent: paddedBoxPercent,
+                    contourLoops: contourLoops,
+                    onDeviceLabels: onDeviceLabels,
+                    isObjectMatched: true
+                )
             }
         }
 

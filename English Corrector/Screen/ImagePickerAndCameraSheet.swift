@@ -900,6 +900,12 @@ struct InteractiveSceneImageViewerSheet: View {
     @State private var baseOffset: CGSize = .zero
     @State private var dismissDragOffsetY: CGFloat = 0
 
+    // Lasso / Swiping Gesture States for Object Cutoff
+    @State private var lassoPoints: [CGPoint] = []
+    @State private var isDrawingLasso: Bool = false
+    @State private var isLassoMode: Bool = true
+    @State private var longPressDetectionTask: Task<Void, Never>? = nil
+
     init(
         image: UIImage,
         scene: AISceneDescriptionResponse,
@@ -1013,29 +1019,92 @@ struct InteractiveSceneImageViewerSheet: View {
                         .resizable()
                         .frame(width: fittedRect.width, height: fittedRect.height)
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation {
-                                selectedObject = nil
-                            }
-                        }
                         .gesture(
-                            LongPressGesture(minimumDuration: 0.35)
-                                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                            DragGesture(minimumDistance: 0, coordinateSpace: .local)
                                 .onChanged { value in
-                                    switch value {
-                                    case .second(true, let drag):
-                                        if !hasTriggeredLongPress, let drag = drag {
-                                            hasTriggeredLongPress = true
-                                            handleLongPress(at: drag.location, in: fittedRect.size)
+                                    if scale > 1.05 && !isLassoMode { return }
+
+                                    if lassoPoints.isEmpty {
+                                        lassoPoints.append(value.startLocation)
+                                        longPressDetectionTask?.cancel()
+                                        let startLoc = value.startLocation
+                                        longPressDetectionTask = Task {
+                                            try? await Task.sleep(nanoseconds: 350_000_000)
+                                            guard !Task.isCancelled else { return }
+                                            await MainActor.run {
+                                                if !isDrawingLasso && !hasTriggeredLongPress && !isDetectingObject {
+                                                    hasTriggeredLongPress = true
+                                                    handleLongPress(at: startLoc, in: fittedRect.size)
+                                                }
+                                            }
                                         }
-                                    default:
-                                        break
+                                    }
+
+                                    let dist = hypot(value.location.x - value.startLocation.x, value.location.y - value.startLocation.y)
+                                    if dist > 8 {
+                                        longPressDetectionTask?.cancel()
+                                        isDrawingLasso = true
+                                        lassoPoints.append(value.location)
                                     }
                                 }
-                                .onEnded { _ in
-                                    hasTriggeredLongPress = false
+                                .onEnded { value in
+                                    longPressDetectionTask?.cancel()
+                                    if scale > 1.05 && !isLassoMode { return }
+
+                                    if hasTriggeredLongPress {
+                                        hasTriggeredLongPress = false
+                                        lassoPoints = []
+                                        isDrawingLasso = false
+                                        return
+                                    }
+
+                                    let xs = lassoPoints.map { $0.x }
+                                    let ys = lassoPoints.map { $0.y }
+                                    let minX = xs.min() ?? 0
+                                    let maxX = xs.max() ?? 0
+                                    let minY = ys.min() ?? 0
+                                    let maxY = ys.max() ?? 0
+                                    let boxW = maxX - minX
+                                    let boxH = maxY - minY
+                                    let totalDist = zip(lassoPoints, lassoPoints.dropFirst()).reduce(0.0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
+
+                                    if totalDist < 16 || (boxW < 12 && boxH < 12) {
+                                        withAnimation {
+                                            selectedObject = nil
+                                        }
+                                        lassoPoints = []
+                                        isDrawingLasso = false
+                                    } else {
+                                        let midX = (minX + maxX) / 2.0
+                                        let midY = (minY + maxY) / 2.0
+                                        let boxPercent = CGRect(
+                                            x: (minX / fittedRect.width) * 100.0,
+                                            y: (minY / fittedRect.height) * 100.0,
+                                            width: max(2.0, (boxW / fittedRect.width) * 100.0),
+                                            height: max(2.0, (boxH / fittedRect.height) * 100.0)
+                                        )
+                                        handleLassoCircle(
+                                            boxPercent: boxPercent,
+                                            centerPoint: CGPoint(x: midX, y: midY),
+                                            in: fittedRect.size
+                                        )
+                                    }
                                 }
                         )
+
+                    // Real-time glowing laser stroke when user swipes around an item
+                    if !lassoPoints.isEmpty {
+                        LassoPathOverlay(points: lassoPoints)
+                    }
+
+                    if isDrawingLasso, let tip = lassoPoints.last {
+                        Circle()
+                            .fill(AppTheme.Semantic.warning)
+                            .frame(width: 8, height: 8)
+                            .shadow(color: AppTheme.Semantic.warning, radius: 4)
+                            .position(tip)
+                            .allowsHitTesting(false)
+                    }
 
                     // 1. Curved leader arrows connecting badge to target
                     ForEach(Array(currentScene.objectsDetected.enumerated()), id: \.element.id) { index, item in
@@ -1155,18 +1224,18 @@ struct InteractiveSceneImageViewerSheet: View {
 
                         if !isScanningAllItems {
                             HStack(spacing: 5) {
-                                Image(systemName: "hand.tap.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(AppTheme.Accent.a500)
+                                Image(systemName: "lasso")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(AppTheme.Semantic.warning)
                                 Text(currentScene.objectsDetected.isEmpty
-                                     ? "Bấm nút trên để nhận diện tất cả, hoặc nhấn đè vào đồ vật bất kỳ"
-                                     : "Nhấn đè vào đồ vật bất kỳ để AI nhận diện thêm")
+                                     ? "Vuốt khoanh quanh đồ vật hoặc nhấn đè để AI tách nền nhận diện"
+                                     : "Vuốt khoanh quanh đồ vật bất kỳ để AI nhận diện thêm")
                                     .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.85))
+                                    .foregroundStyle(Color.white.opacity(0.9))
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.6))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.75))
                             .clipShape(Capsule())
                         }
 
@@ -1175,7 +1244,7 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
 
 
-                // Quick Reset Zoom Indicator Badge
+                // Quick Reset Zoom & Lasso Mode Toggle Badge
                 if scale > 1.05 {
                     VStack {
                         HStack {
@@ -1195,26 +1264,51 @@ struct InteractiveSceneImageViewerSheet: View {
     }
 
     private var zoomResetBadge: some View {
-        Button {
-            resetZoom()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.counterclockwise.circle.fill")
-                    .font(.caption)
-                Text(String(format: "%.1fx", scale))
-                    .font(.caption.bold())
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                    isLassoMode.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: isLassoMode ? "lasso" : "hand.point.up.braille.fill")
+                        .font(.caption2.bold())
+                    Text(isLassoMode ? "Khoanh vùng" : "Di chuyển")
+                        .font(.caption2.bold())
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(isLassoMode ? AppTheme.Semantic.warning.opacity(0.85) : Color.black.opacity(0.75))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
+                }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.75))
-            .clipShape(Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
+            .buttonStyle(.plain)
+
+            Button {
+                resetZoom()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.counterclockwise.circle.fill")
+                        .font(.caption)
+                    Text(String(format: "%.1fx", scale))
+                        .font(.caption.bold())
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.75))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
+                }
             }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     private func resetZoom() {
@@ -1223,6 +1317,7 @@ struct InteractiveSceneImageViewerSheet: View {
             baseScale = 1.0
             offset = .zero
             baseOffset = .zero
+            isLassoMode = true
         }
     }
 
@@ -1235,6 +1330,7 @@ struct InteractiveSceneImageViewerSheet: View {
                         baseScale = 1.0
                         offset = .zero
                         baseOffset = .zero
+                        isLassoMode = true
                     } else {
                         scale = 2.5
                         baseScale = 2.5
@@ -1258,6 +1354,7 @@ struct InteractiveSceneImageViewerSheet: View {
                         baseScale = 1.0
                         offset = .zero
                         baseOffset = .zero
+                        isLassoMode = true
                     } else {
                         scale = min(4.0, scale)
                         baseScale = scale
@@ -1269,19 +1366,23 @@ struct InteractiveSceneImageViewerSheet: View {
     private func panOrDismissGesture(fittedRect: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
-                if scale > 1.05 {
+                guard !isDrawingLasso else { return }
+
+                if scale > 1.05 && !isLassoMode {
                     offset = CGSize(
                         width: baseOffset.width + value.translation.width,
                         height: baseOffset.height + value.translation.height
                     )
-                } else {
+                } else if scale <= 1.05 {
                     if value.translation.height > 0 {
                         dismissDragOffsetY = value.translation.height
                     }
                 }
             }
             .onEnded { value in
-                if scale > 1.05 {
+                guard !isDrawingLasso else { return }
+
+                if scale > 1.05 && !isLassoMode {
                     let maxPanX = max(0, (fittedRect.width * (scale - 1.0)) / 2.0 + 40)
                     let maxPanY = max(0, (fittedRect.height * (scale - 1.0)) / 2.0 + 40)
                     let clampedX = min(maxPanX, max(-maxPanX, offset.width))
@@ -1291,7 +1392,7 @@ struct InteractiveSceneImageViewerSheet: View {
                         offset = CGSize(width: clampedX, height: clampedY)
                         baseOffset = offset
                     }
-                } else {
+                } else if scale <= 1.05 {
                     if value.translation.height > 80 || value.predictedEndTranslation.height > 150 {
                         dismiss()
                     } else {
@@ -1436,6 +1537,18 @@ struct InteractiveSceneImageViewerSheet: View {
     }
 
     private func handleLongPress(at location: CGPoint, in imageSize: CGSize) {
+        processObjectCropAndDetection(customBox: nil, at: location, in: imageSize)
+    }
+
+    private func handleLassoCircle(boxPercent: CGRect, centerPoint: CGPoint, in imageSize: CGSize) {
+        processObjectCropAndDetection(customBox: boxPercent, at: centerPoint, in: imageSize)
+    }
+
+    private func processObjectCropAndDetection(
+        customBox: CGRect?,
+        at location: CGPoint,
+        in imageSize: CGSize
+    ) {
         guard !isDetectingObject, imageSize.width > 0, imageSize.height > 0 else { return }
 
         let clampedX = max(1.0, min(99.0, (location.x / imageSize.width) * 100.0))
@@ -1450,15 +1563,21 @@ struct InteractiveSceneImageViewerSheet: View {
 
         Task {
             do {
-                // 1. Instant on-device Apple Vision detection (~15ms)
+                // 1. Instant on-device Apple Vision detection + customBox crop & cutoff
                 let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
                     from: image,
+                    inCustomBoxPercent: customBox,
                     atXPercent: clampedX,
                     yPercent: clampedY
                 )
 
                 // 2. Animate Laser Contour Border & Lift Cutout (NO PRELIMINARY DUMMY TAG CREATED)
                 await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        lassoPoints = []
+                        isDrawingLasso = false
+                    }
+
                     let box = detected.paddedBoxPercent
                     let rect = CGRect(
                         x: (box.origin.x / 100.0) * imageSize.width,
@@ -1533,6 +1652,10 @@ struct InteractiveSceneImageViewerSheet: View {
                 }
             } catch {
                 await MainActor.run {
+                    withAnimation {
+                        lassoPoints = []
+                        isDrawingLasso = false
+                    }
                     handleDetectionFailure()
                 }
             }
@@ -2454,5 +2577,38 @@ struct CroppedObjectDetailSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Lasso / Gesture Circling Overlay
+
+private struct LassoPathOverlay: View {
+    let points: [CGPoint]
+
+    var body: some View {
+        Canvas { context, size in
+            guard points.count > 1 else { return }
+
+            var path = Path()
+            path.move(to: points[0])
+            for i in 1..<points.count {
+                path.addLine(to: points[i])
+            }
+
+            // Outer wide ambient laser glow
+            context.stroke(
+                path,
+                with: .color(AppTheme.Semantic.warning.opacity(0.4)),
+                style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round)
+            )
+
+            // Inner crisp glowing laser stroke
+            context.stroke(
+                path,
+                with: .color(AppTheme.Semantic.warning),
+                style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+            )
+        }
+        .allowsHitTesting(false)
     }
 }
