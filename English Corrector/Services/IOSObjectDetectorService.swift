@@ -88,6 +88,7 @@ final class IOSObjectDetectorService: Sendable {
     func detectAndCropObject(
         from image: UIImage,
         inCustomBoxPercent customBox: CGRect? = nil,
+        lassoPointsPercent: [CGPoint]? = nil,
         atXPercent xPercent: Double,
         yPercent: Double
     ) async throws -> IOSDetectedObjectResult {
@@ -120,7 +121,7 @@ final class IOSObjectDetectorService: Sendable {
         if let userBox = normalizedCustomBox {
             let padX = max(0.012, userBox.width * 0.10)
             let padTop = max(0.012, userBox.height * 0.10)
-            let padBottom = max(0.018, userBox.height * 0.14)
+            let padBottom = max(0.020, userBox.height * 0.18)
 
             let pMinX = max(0.0, userBox.minX - padX)
             let pMinY = max(0.0, userBox.minY - padTop)
@@ -177,10 +178,39 @@ final class IOSObjectDetectorService: Sendable {
                     }
                 }
 
-                let finalBoundingBoxPercent: CGRect
-                let finalCenterPercent: CGPoint
+                // Check if Vision's cutout severely truncated or chopped the user's circled object
+                let userBoxH = userBox.height
+                let userBoxW = userBox.width
+                var isCutoutSeverelyChopped = false
 
                 if let metrics = cutoutMetrics {
+                    let cutoutHInFull = metrics.bounds.height * paddedBox.height
+                    let cutoutWInFull = metrics.bounds.width * paddedBox.width
+                    let verticalCoverage = cutoutHInFull / userBoxH
+                    let horizontalCoverage = cutoutWInFull / userBoxW
+                    let cutoutBottomInFull = paddedBox.minY + metrics.bounds.maxY * paddedBox.height
+                    let bottomMissed = userBox.maxY - cutoutBottomInFull
+
+                    // If cutout misses more than 28% of user's circled height,
+                    // or bottom is cut off by more than 14% of object height,
+                    // or cutout covers less than 50% of circled width
+                    if verticalCoverage < 0.72 || bottomMissed > max(0.04, userBoxH * 0.14) || horizontalCoverage < 0.50 {
+                        isCutoutSeverelyChopped = true
+                    }
+                } else {
+                    isCutoutSeverelyChopped = true
+                }
+
+                let finalBoundingBoxPercent: CGRect
+                let finalCenterPercent: CGPoint
+                let cutoutUIImage: UIImage?
+                let contourLoops: [[CGPoint]]
+
+                if !isCutoutSeverelyChopped, let metrics = cutoutMetrics, let cg = cutoutCG {
+                    // Full object cleanly isolated by Vision instance mask
+                    cutoutUIImage = UIImage(cgImage: cg)
+                    contourLoops = extractSilhouetteContourLoops(from: cg, fallbackCrop: croppedCG)
+
                     let boxInFull = CGRect(
                         x: paddedBox.minX + metrics.bounds.minX * paddedBox.width,
                         y: paddedBox.minY + metrics.bounds.minY * paddedBox.height,
@@ -198,6 +228,11 @@ final class IOSObjectDetectorService: Sendable {
                         height: max(2.0, boxInFull.height * 100.0)
                     )
                 } else {
+                    // Large object where Vision segmented only a partial piece:
+                    // Discard the chopped cutout (cutoutUIImage = nil) so the full object (croppedCG) is preserved for AI and UI,
+                    // and use the user's swiped lasso path as the neon contour so the laser runs around the entire object!
+                    cutoutUIImage = nil
+
                     finalCenterPercent = CGPoint(
                         x: max(2.0, min(98.0, userBox.midX * 100.0)),
                         y: max(2.0, min(98.0, userBox.midY * 100.0))
@@ -208,6 +243,23 @@ final class IOSObjectDetectorService: Sendable {
                         width: max(2.0, userBox.width * 100.0),
                         height: max(2.0, userBox.height * 100.0)
                     )
+
+                    if let lassoPts = lassoPointsPercent, lassoPts.count >= 6 {
+                        let mapped: [CGPoint] = lassoPts.map { pt in
+                            let fullX = pt.x / 100.0
+                            let fullY = pt.y / 100.0
+                            let cropX = max(0.0, min(1.0, (fullX - paddedBox.minX) / paddedBox.width))
+                            let cropY = max(0.0, min(1.0, 1.0 - ((fullY - paddedBox.minY) / paddedBox.height)))
+                            return CGPoint(x: cropX, y: cropY)
+                        }
+                        var closed = mapped
+                        if let first = closed.first, let last = closed.last, hypot(first.x - last.x, first.y - last.y) > 0.02 {
+                            closed.append(first)
+                        }
+                        contourLoops = [closed]
+                    } else {
+                        contourLoops = extractSilhouetteContourLoops(from: nil, fallbackCrop: croppedCG)
+                    }
                 }
 
                 let paddedBoxPercent = CGRect(
@@ -217,10 +269,8 @@ final class IOSObjectDetectorService: Sendable {
                     height: paddedBox.height * 100.0
                 )
 
-                let contourLoops = extractSilhouetteContourLoops(from: cutoutCG, fallbackCrop: croppedCG)
                 let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: nil)
                 let croppedUIImage = UIImage(cgImage: croppedCG)
-                let cutoutUIImage = cutoutCG.map { UIImage(cgImage: $0) }
                 let jpegData = croppedUIImage.jpegData(compressionQuality: 0.85) ?? Data()
 
                 return IOSDetectedObjectResult(
@@ -677,10 +727,8 @@ final class IOSObjectDetectorService: Sendable {
 
         var selected = IndexSet()
         for (instance, inBoxCount) in instanceCountsInUserBox {
-            let totalCount = instanceCountsTotal[instance, default: 1]
-            // An instance is included if it has prominent presence in the swiped area
-            // and is not merely an external neighbor that leaked over the outer edge border
-            if inBoxCount >= 6 && Double(inBoxCount) / Double(totalCount) >= 0.20 {
+            // Any instance with at least 8 pixels inside the user's swiped region is a component of the object
+            if inBoxCount >= 8 {
                 selected.insert(instance)
             }
         }

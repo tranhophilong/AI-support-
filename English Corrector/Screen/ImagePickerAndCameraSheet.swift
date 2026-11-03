@@ -1087,8 +1087,15 @@ struct InteractiveSceneImageViewerSheet: View {
                                             width: max(2.0, (boxW / fittedRect.width) * 100.0),
                                             height: max(2.0, (boxH / fittedRect.height) * 100.0)
                                         )
+                                        let lassoPercent = capturedPoints.map { pt in
+                                            CGPoint(
+                                                x: max(0.0, min(100.0, (pt.x / fittedRect.width) * 100.0)),
+                                                y: max(0.0, min(100.0, (pt.y / fittedRect.height) * 100.0))
+                                            )
+                                        }
                                         handleLassoCircle(
                                             boxPercent: boxPercent,
+                                            lassoPointsPercent: lassoPercent,
                                             centerPoint: CGPoint(x: midX, y: midY),
                                             in: fittedRect.size
                                         )
@@ -1552,12 +1559,23 @@ struct InteractiveSceneImageViewerSheet: View {
         processObjectCropAndDetection(customBox: nil, at: location, in: imageSize)
     }
 
-    private func handleLassoCircle(boxPercent: CGRect, centerPoint: CGPoint, in imageSize: CGSize) {
-        processObjectCropAndDetection(customBox: boxPercent, at: centerPoint, in: imageSize)
+    private func handleLassoCircle(
+        boxPercent: CGRect,
+        lassoPointsPercent: [CGPoint],
+        centerPoint: CGPoint,
+        in imageSize: CGSize
+    ) {
+        processObjectCropAndDetection(
+            customBox: boxPercent,
+            lassoPointsPercent: lassoPointsPercent,
+            at: centerPoint,
+            in: imageSize
+        )
     }
 
     private func processObjectCropAndDetection(
         customBox: CGRect?,
+        lassoPointsPercent: [CGPoint]? = nil,
         at location: CGPoint,
         in imageSize: CGSize
     ) {
@@ -1579,6 +1597,7 @@ struct InteractiveSceneImageViewerSheet: View {
                 let detected = try await IOSObjectDetectorService.shared.detectAndCropObject(
                     from: image,
                     inCustomBoxPercent: customBox,
+                    lassoPointsPercent: lassoPointsPercent,
                     atXPercent: clampedX,
                     yPercent: clampedY
                 )
