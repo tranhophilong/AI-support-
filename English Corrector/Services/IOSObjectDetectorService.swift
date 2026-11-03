@@ -117,11 +117,11 @@ final class IOSObjectDetectorService: Sendable {
         }
 
         // PATH A: User swiped / lassoed around a specific object (customBox != nil)
-        // Crop cgImage to user's swiped region FIRST so previous detections elsewhere are never included.
+        // Crop cgImage tightly to user's swiped region (3% margin) so external items outside the circle are never included.
         if let userBox = normalizedCustomBox {
-            let padX = max(0.012, userBox.width * 0.10)
-            let padTop = max(0.012, userBox.height * 0.10)
-            let padBottom = max(0.020, userBox.height * 0.18)
+            let padX = max(0.004, userBox.width * 0.03)
+            let padTop = max(0.004, userBox.height * 0.03)
+            let padBottom = max(0.004, userBox.height * 0.03)
 
             let pMinX = max(0.0, userBox.minX - padX)
             let pMinY = max(0.0, userBox.minY - padTop)
@@ -211,12 +211,16 @@ final class IOSObjectDetectorService: Sendable {
                     cutoutUIImage = UIImage(cgImage: cg)
                     contourLoops = extractSilhouetteContourLoops(from: cg, fallbackCrop: croppedCG)
 
-                    let boxInFull = CGRect(
+                    let rawBoxInFull = CGRect(
                         x: paddedBox.minX + metrics.bounds.minX * paddedBox.width,
                         y: paddedBox.minY + metrics.bounds.minY * paddedBox.height,
                         width: metrics.bounds.width * paddedBox.width,
                         height: metrics.bounds.height * paddedBox.height
                     )
+                    // Clamp strictly within user's circled boundary so it never escapes outside
+                    let allowedBoundary = userBox.insetBy(dx: -0.015, dy: -0.015)
+                    let boxInFull = rawBoxInFull.intersection(allowedBoundary) ?? userBox
+
                     finalCenterPercent = CGPoint(
                         x: max(2.0, min(98.0, (paddedBox.minX + metrics.center.x * paddedBox.width) * 100.0)),
                         y: max(2.0, min(98.0, (paddedBox.minY + metrics.center.y * paddedBox.height) * 100.0))
@@ -705,6 +709,8 @@ final class IOSObjectDetectorService: Sendable {
 
         var instanceCountsInUserBox: [Int: Int] = [:]
         var instanceCountsTotal: [Int: Int] = [:]
+        var sumXPerInstance: [Int: Int] = [:]
+        var sumYPerInstance: [Int: Int] = [:]
 
         let startX = max(0, min(width - 1, Int(userBoxInCrop.minX * Double(width))))
         let endX = max(startX, min(width - 1, Int(userBoxInCrop.maxX * Double(width))))
@@ -718,6 +724,8 @@ final class IOSObjectDetectorService: Sendable {
                 let val = Int(buffer[rowStart + x])
                 if val > 0 && observation.allInstances.contains(val) {
                     instanceCountsTotal[val, default: 0] += 1
+                    sumXPerInstance[val, default: 0] += x
+                    sumYPerInstance[val, default: 0] += y
                     if isInsideY && (x >= startX && x <= endX) {
                         instanceCountsInUserBox[val, default: 0] += 1
                     }
@@ -726,39 +734,30 @@ final class IOSObjectDetectorService: Sendable {
         }
 
         var selected = IndexSet()
-        for (instance, inBoxCount) in instanceCountsInUserBox {
-            // Any instance with at least 8 pixels inside the user's swiped region is a component of the object
-            if inBoxCount >= 8 {
+        for (instance, totalCount) in instanceCountsTotal {
+            let inBoxCount = instanceCountsInUserBox[instance, default: 0]
+            guard inBoxCount >= 15, totalCount > 0 else { continue }
+
+            let meanX = Double(sumXPerInstance[instance, default: 0]) / Double(totalCount * width)
+            let meanY = Double(sumYPerInstance[instance, default: 0]) / Double(totalCount * height)
+            let isCenterInside = userBoxInCrop.contains(CGPoint(x: meanX, y: meanY))
+            let ratio = Double(inBoxCount) / Double(totalCount)
+
+            // Strictly accept instances whose center of mass is inside the circled area
+            // or at least 35% of their total pixels are inside the circle.
+            // External neighbor objects (tables, nearby items) are completely filtered out.
+            if (isCenterInside && ratio >= 0.20) || ratio >= 0.35 {
                 selected.insert(instance)
             }
         }
 
-        // Fallback: if no instance passed the ratio check, pick instance closest to the center
+        // Fallback: if no instance passed the criteria, pick ONLY the instance right at the center of the user's circle
         if selected.isEmpty {
             let midX = max(0, min(width - 1, Int(userBoxInCrop.midX * Double(width))))
             let midY = max(0, min(height - 1, Int(userBoxInCrop.midY * Double(height))))
             let centerVal = Int(buffer[midY * bytesPerRow + midX])
             if centerVal > 0 && observation.allInstances.contains(centerVal) {
                 selected.insert(centerVal)
-            } else {
-                let maxR = min(8, min(width / 8, height / 8))
-                for r in 1...maxR {
-                    for dy in -r...r {
-                        for dx in -r...r {
-                            let px = midX + dx
-                            let py = midY + dy
-                            if px >= 0 && px < width && py >= 0 && py < height {
-                                let val = Int(buffer[py * bytesPerRow + px])
-                                if val > 0 && observation.allInstances.contains(val) {
-                                    selected.insert(val)
-                                    break
-                                }
-                            }
-                        }
-                        if !selected.isEmpty { break }
-                    }
-                    if !selected.isEmpty { break }
-                }
             }
         }
 

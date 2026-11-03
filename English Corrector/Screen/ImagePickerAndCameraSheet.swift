@@ -1075,8 +1075,7 @@ struct InteractiveSceneImageViewerSheet: View {
                                         let minX = max(0, min(fittedRect.width, rawMinX))
                                         let maxX = max(minX + 1, min(fittedRect.width, rawMaxX))
                                         let minY = max(0, min(fittedRect.height, rawMinY))
-                                        // Allow slightly generous bottom bound when user swipes around a large object
-                                        let maxY = max(minY + 1, min(fittedRect.height, rawMaxY + max(8, rawBoxH * 0.06)))
+                                        let maxY = max(minY + 1, min(fittedRect.height, rawMaxY))
                                         let boxW = maxX - minX
                                         let boxH = maxY - minY
                                         let midX = (minX + maxX) / 2.0
