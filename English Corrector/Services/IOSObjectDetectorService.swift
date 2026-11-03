@@ -115,47 +115,149 @@ final class IOSObjectDetectorService: Sendable {
             return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
         }
 
-        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        // PATH A: User swiped / lassoed around a specific object (customBox != nil)
+        // Crop cgImage to user's swiped region FIRST so previous detections elsewhere are never included.
+        if let userBox = normalizedCustomBox {
+            let padX = max(0.012, userBox.width * 0.10)
+            let padTop = max(0.012, userBox.height * 0.10)
+            let padBottom = max(0.018, userBox.height * 0.14)
 
-        // 2. High-precision instance segmentation (iOS 17+)
-        // Directly isolate the targeted object at (clampedX, clampedY) or within user-swiped customBox
+            let pMinX = max(0.0, userBox.minX - padX)
+            let pMinY = max(0.0, userBox.minY - padTop)
+            let pMaxX = min(1.0, userBox.maxX + padX)
+            let pMaxY = min(1.0, userBox.maxY + padBottom)
+
+            let paddedBox = CGRect(
+                x: pMinX,
+                y: pMinY,
+                width: max(0.03, pMaxX - pMinX),
+                height: max(0.03, pMaxY - pMinY)
+            )
+
+            let pixelRect = CGRect(
+                x: paddedBox.origin.x * imageWidth,
+                y: paddedBox.origin.y * imageHeight,
+                width: paddedBox.size.width * imageWidth,
+                height: paddedBox.size.height * imageHeight
+            ).integral
+
+            if let croppedCG = cgImage.cropping(to: pixelRect) {
+                var cutoutCG: CGImage? = nil
+                var cutoutMetrics: CutoutMetrics? = nil
+
+                if #available(iOS 17.0, *) {
+                    let cropHandler = VNImageRequestHandler(cgImage: croppedCG, orientation: .up, options: [:])
+                    let cropMaskReq = VNGenerateForegroundInstanceMaskRequest()
+                    if (try? cropHandler.perform([cropMaskReq])) != nil,
+                       let observation = cropMaskReq.results?.first,
+                       !observation.allInstances.isEmpty {
+                        let userBoxInCrop = CGRect(
+                            x: (userBox.minX - paddedBox.minX) / paddedBox.width,
+                            y: (userBox.minY - paddedBox.minY) / paddedBox.height,
+                            width: userBox.width / paddedBox.width,
+                            height: userBox.height / paddedBox.height
+                        )
+                        let targetInstances = selectRelevantInstancesInCrop(
+                            observation: observation,
+                            userBoxInCrop: userBoxInCrop
+                        )
+                        if !targetInstances.isEmpty,
+                           let maskedBuffer = try? observation.generateMaskedImage(
+                            ofInstances: targetInstances,
+                            from: cropHandler,
+                            croppedToInstancesExtent: false
+                           ) {
+                            let ciImage = CIImage(cvPixelBuffer: maskedBuffer)
+                            let ciContext = CIContext(options: nil)
+                            if let output = ciContext.createCGImage(ciImage, from: ciImage.extent) {
+                                cutoutCG = output
+                                cutoutMetrics = computeCutoutMetrics(from: output)
+                            }
+                        }
+                    }
+                }
+
+                let finalBoundingBoxPercent: CGRect
+                let finalCenterPercent: CGPoint
+
+                if let metrics = cutoutMetrics {
+                    let boxInFull = CGRect(
+                        x: paddedBox.minX + metrics.bounds.minX * paddedBox.width,
+                        y: paddedBox.minY + metrics.bounds.minY * paddedBox.height,
+                        width: metrics.bounds.width * paddedBox.width,
+                        height: metrics.bounds.height * paddedBox.height
+                    )
+                    finalCenterPercent = CGPoint(
+                        x: max(2.0, min(98.0, (paddedBox.minX + metrics.center.x * paddedBox.width) * 100.0)),
+                        y: max(2.0, min(98.0, (paddedBox.minY + metrics.center.y * paddedBox.height) * 100.0))
+                    )
+                    finalBoundingBoxPercent = CGRect(
+                        x: boxInFull.minX * 100.0,
+                        y: boxInFull.minY * 100.0,
+                        width: max(2.0, boxInFull.width * 100.0),
+                        height: max(2.0, boxInFull.height * 100.0)
+                    )
+                } else {
+                    finalCenterPercent = CGPoint(
+                        x: max(2.0, min(98.0, userBox.midX * 100.0)),
+                        y: max(2.0, min(98.0, userBox.midY * 100.0))
+                    )
+                    finalBoundingBoxPercent = CGRect(
+                        x: userBox.minX * 100.0,
+                        y: userBox.minY * 100.0,
+                        width: max(2.0, userBox.width * 100.0),
+                        height: max(2.0, userBox.height * 100.0)
+                    )
+                }
+
+                let paddedBoxPercent = CGRect(
+                    x: paddedBox.minX * 100.0,
+                    y: paddedBox.minY * 100.0,
+                    width: paddedBox.width * 100.0,
+                    height: paddedBox.height * 100.0
+                )
+
+                let contourLoops = extractSilhouetteContourLoops(from: cutoutCG, fallbackCrop: croppedCG)
+                let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: nil)
+                let croppedUIImage = UIImage(cgImage: croppedCG)
+                let cutoutUIImage = cutoutCG.map { UIImage(cgImage: $0) }
+                let jpegData = croppedUIImage.jpegData(compressionQuality: 0.85) ?? Data()
+
+                return IOSDetectedObjectResult(
+                    croppedImage: croppedUIImage,
+                    cutoutImage: cutoutUIImage,
+                    croppedImageData: jpegData,
+                    refinedCenterPercent: finalCenterPercent,
+                    boundingBoxPercent: finalBoundingBoxPercent,
+                    paddedBoxPercent: paddedBoxPercent,
+                    contourLoops: contourLoops,
+                    onDeviceLabels: onDeviceLabels,
+                    isObjectMatched: true
+                )
+            }
+        }
+
+        // PATH B: Tap / Long-press on a single coordinate (customBox == nil)
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
         if #available(iOS 17.0, *) {
             let maskRequest = VNGenerateForegroundInstanceMaskRequest()
             if (try? handler.perform([maskRequest])) != nil,
                let observation = maskRequest.results?.first,
-               !observation.allInstances.isEmpty {
-                let targetInstances = findInstanceIndices(
-                    in: observation,
-                    customBox: normalizedCustomBox,
-                    atX: clampedX,
-                    y: clampedY
-                )
-                if !targetInstances.isEmpty,
-                   let maskedBuffer = try? observation.generateMaskedImage(
+               !observation.allInstances.isEmpty,
+               let targetInstance = findInstanceIndex(in: observation, atX: clampedX, y: clampedY) {
+                let targetInstances = IndexSet(integer: targetInstance)
+                if let maskedBuffer = try? observation.generateMaskedImage(
                     ofInstances: targetInstances,
                     from: handler,
                     croppedToInstancesExtent: false
-                   ) {
+                ) {
                     let ciImage = CIImage(cvPixelBuffer: maskedBuffer)
                     let ciContext = CIContext(options: nil)
                     if let outputCG = ciContext.createCGImage(ciImage, from: ciImage.extent),
                        let metrics = computeCutoutMetrics(from: outputCG) {
-                        // Allow larger foreground objects (especially when user explicitly swiped customBox around a large item)
-                        let maxAllowedArea: CGFloat = (normalizedCustomBox != nil) ? 0.96 : 0.85
-                        if metrics.bounds.width >= 0.015 && metrics.bounds.height >= 0.015 &&
-                            (metrics.bounds.width * metrics.bounds.height) < maxAllowedArea {
-
-                            // Combine Vision instance bounds with user-swiped customBox so neither clips the bottom of large objects
-                            let itemBox: CGRect
-                            let didMaskClipBottom: Bool
-                            if let userBox = normalizedCustomBox {
-                                itemBox = metrics.bounds.union(userBox)
-                                didMaskClipBottom = (userBox.maxY - metrics.bounds.maxY) > max(0.05, userBox.height * 0.16)
-                            } else {
-                                itemBox = metrics.bounds
-                                didMaskClipBottom = false
-                            }
-
+                        let itemBox = metrics.bounds
+                        if itemBox.width >= 0.015 && itemBox.height >= 0.015 &&
+                            (itemBox.width * itemBox.height) < 0.88 {
                             let padX = max(0.014, itemBox.width * 0.16)
                             let padTop = max(0.014, itemBox.height * 0.16)
                             let padBottom = max(0.020, itemBox.height * 0.20)
@@ -179,31 +281,16 @@ final class IOSObjectDetectorService: Sendable {
                             ).integral
 
                             if let croppedCG = cgImage.cropping(to: pixelRect) {
-                                let croppedUIImage = UIImage(cgImage: croppedCG)
                                 let cutoutCG = outputCG.cropping(to: pixelRect)
-                                let cutoutUIImage: UIImage?
-                                if didMaskClipBottom {
-                                    // Re-extract cutout directly from full croppedCG (including all instances) so bottom is never cut off
-                                    let (fallbackCutout, fallbackMetrics) = extractForegroundCutout(
-                                        for: croppedCG,
-                                        includeAllInstances: true
-                                    )
-                                    if let fbMetrics = fallbackMetrics, fbMetrics.bounds.maxY >= 0.78 {
-                                        cutoutUIImage = fallbackCutout
-                                    } else {
-                                        cutoutUIImage = nil
-                                    }
-                                } else {
-                                    cutoutUIImage = cutoutCG != nil ? UIImage(cgImage: cutoutCG!) : nil
-                                }
-
+                                let croppedUIImage = UIImage(cgImage: croppedCG)
+                                let cutoutUIImage = cutoutCG != nil ? UIImage(cgImage: cutoutCG!) : nil
                                 let jpegData = croppedUIImage.jpegData(compressionQuality: 0.85) ?? Data()
-                                let contourLoops = extractContourLoops(for: (didMaskClipBottom ? nil : cutoutCG) ?? croppedCG)
+                                let contourLoops = extractSilhouetteContourLoops(from: cutoutCG, fallbackCrop: croppedCG)
                                 let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: nil)
 
                                 let finalCenterPercent = CGPoint(
-                                    x: max(2.0, min(98.0, itemBox.midX * 100.0)),
-                                    y: max(2.0, min(98.0, itemBox.midY * 100.0))
+                                    x: max(2.0, min(98.0, metrics.center.x * 100.0)),
+                                    y: max(2.0, min(98.0, metrics.center.y * 100.0))
                                 )
                                 let finalBoundingBoxPercent = CGRect(
                                     x: itemBox.minX * 100.0,
@@ -233,102 +320,6 @@ final class IOSObjectDetectorService: Sendable {
                         }
                     }
                 }
-            }
-        }
-
-        // If user swiped around a specific region, directly prioritize the user's circled box
-        if let uiBox = normalizedCustomBox {
-            let padX = max(0.015, uiBox.width * 0.12)
-            let padTop = max(0.015, uiBox.height * 0.12)
-            let padBottom = max(0.022, uiBox.height * 0.18)
-            let pMinX = max(0.0, uiBox.minX - padX)
-            let pMinY = max(0.0, uiBox.minY - padTop)
-            let pMaxX = min(1.0, uiBox.maxX + padX)
-            let pMaxY = min(1.0, uiBox.maxY + padBottom)
-
-            let paddedBox = CGRect(
-                x: pMinX,
-                y: pMinY,
-                width: max(0.04, pMaxX - pMinX),
-                height: max(0.04, pMaxY - pMinY)
-            )
-
-            let pixelRect = CGRect(
-                x: paddedBox.origin.x * imageWidth,
-                y: paddedBox.origin.y * imageHeight,
-                width: paddedBox.size.width * imageWidth,
-                height: paddedBox.size.height * imageHeight
-            ).integral
-
-            if let croppedCG = cgImage.cropping(to: pixelRect) {
-                let croppedUIImage = UIImage(cgImage: croppedCG)
-                let jpegData = croppedUIImage.jpegData(compressionQuality: 0.85) ?? Data()
-                let contourLoops = extractContourLoops(for: croppedCG)
-                let (rawCutoutImage, cutoutMetrics) = extractForegroundCutout(
-                    for: croppedCG,
-                    includeAllInstances: true
-                )
-                // Keep cutout only if it doesn't chop off the bottom of the swiped object
-                let cutoutImage: UIImage?
-                if let metrics = cutoutMetrics, metrics.bounds.maxY < 0.75 && uiBox.height > 0.25 {
-                    cutoutImage = nil
-                } else {
-                    cutoutImage = rawCutoutImage
-                }
-                let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: nil)
-
-                let finalCenterPercent: CGPoint
-                let finalBoundingBoxPercent: CGRect
-
-                if let metrics = cutoutMetrics, cutoutImage != nil {
-                    let metricBoxInFull = CGRect(
-                        x: paddedBox.minX + metrics.bounds.minX * paddedBox.width,
-                        y: paddedBox.minY + metrics.bounds.minY * paddedBox.height,
-                        width: metrics.bounds.width * paddedBox.width,
-                        height: metrics.bounds.height * paddedBox.height
-                    ).union(uiBox)
-
-                    finalCenterPercent = CGPoint(
-                        x: max(2.0, min(98.0, metricBoxInFull.midX * 100.0)),
-                        y: max(2.0, min(98.0, metricBoxInFull.midY * 100.0))
-                    )
-                    finalBoundingBoxPercent = CGRect(
-                        x: metricBoxInFull.minX * 100.0,
-                        y: metricBoxInFull.minY * 100.0,
-                        width: max(2.0, metricBoxInFull.width * 100.0),
-                        height: max(2.0, metricBoxInFull.height * 100.0)
-                    )
-                } else {
-                    finalCenterPercent = CGPoint(
-                        x: max(2.0, min(98.0, uiBox.midX * 100.0)),
-                        y: max(2.0, min(98.0, uiBox.midY * 100.0))
-                    )
-                    finalBoundingBoxPercent = CGRect(
-                        x: uiBox.origin.x * 100.0,
-                        y: uiBox.origin.y * 100.0,
-                        width: uiBox.size.width * 100.0,
-                        height: uiBox.size.height * 100.0
-                    )
-                }
-
-                let paddedBoxPercent = CGRect(
-                    x: paddedBox.origin.x * 100.0,
-                    y: paddedBox.origin.y * 100.0,
-                    width: paddedBox.size.width * 100.0,
-                    height: paddedBox.size.height * 100.0
-                )
-
-                return IOSDetectedObjectResult(
-                    croppedImage: croppedUIImage,
-                    cutoutImage: cutoutImage,
-                    croppedImageData: jpegData,
-                    refinedCenterPercent: finalCenterPercent,
-                    boundingBoxPercent: finalBoundingBoxPercent,
-                    paddedBoxPercent: paddedBoxPercent,
-                    contourLoops: contourLoops,
-                    onDeviceLabels: onDeviceLabels,
-                    isObjectMatched: true
-                )
             }
         }
 
@@ -453,11 +444,11 @@ final class IOSObjectDetectorService: Sendable {
             throw AIServiceError.apiError(provider: "Vision", message: "Lỗi nén ảnh vật thể")
         }
 
-        // 8. Extract Object Curves & Contours
-        let contourLoops = extractContourLoops(for: croppedCG)
-
-        // 9. Extract Foreground Subject Cutout
+        // 8. Extract Foreground Subject Cutout
         let (cutoutImage, cutoutMetrics) = extractForegroundCutout(for: croppedCG)
+
+        // 9. Extract Object Curves & Contours
+        let contourLoops = extractSilhouetteContourLoops(from: cutoutImage?.cgImage, fallbackCrop: croppedCG)
 
         // 10. Local Classification
         let onDeviceLabels = detectOnDeviceLabels(for: croppedCG, animalLabel: detectedAnimalLabel)
@@ -640,56 +631,90 @@ final class IOSObjectDetectorService: Sendable {
 
     // MARK: - Foreground Instance Lookup
 
-    /// Collects all foreground instance indices for a user-swiped customBox (including lower base/parts of large objects)
-    /// or finds the single targeted instance at (x, y) when customBox is nil.
+    /// Selects foreground instance indices inside a cropped image that correspond to the user-swiped area.
+    /// Excludes external background items that merely poke into the outer edge of the crop.
     @available(iOS 17.0, *)
-    private func findInstanceIndices(
-        in observation: VNInstanceMaskObservation,
-        customBox: CGRect?,
-        atX x: Double,
-        y: Double
+    private func selectRelevantInstancesInCrop(
+        observation: VNInstanceMaskObservation,
+        userBoxInCrop: CGRect
     ) -> IndexSet {
-        var indices = IndexSet()
+        let pixelBuffer = observation.instanceMask
+        guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
+            return observation.allInstances
+        }
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
-        if let box = customBox {
-            let pixelBuffer = observation.instanceMask
-            if CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess {
-                defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return observation.allInstances
+        }
 
-                let width = CVPixelBufferGetWidth(pixelBuffer)
-                let height = CVPixelBufferGetHeight(pixelBuffer)
-                let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-                if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
-                    let buffer = baseAddress.assumingMemoryBound(to: UInt8.self)
+        let buffer = baseAddress.assumingMemoryBound(to: UInt8.self)
 
-                    let insetX = box.width * 0.12
-                    let insetTop = box.height * 0.08
-                    let insetBottom = box.height * 0.04
-                    let minPX = max(0, min(width - 1, Int((box.minX + insetX) * CGFloat(width))))
-                    let maxPX = max(minPX, min(width - 1, Int((box.maxX - insetX) * CGFloat(width))))
-                    let minPY = max(0, min(height - 1, Int((box.minY + insetTop) * CGFloat(height))))
-                    let maxPY = max(minPY, min(height - 1, Int((box.maxY - insetBottom) * CGFloat(height))))
+        var instanceCountsInUserBox: [Int: Int] = [:]
+        var instanceCountsTotal: [Int: Int] = [:]
 
-                    let stepX = max(1, (maxPX - minPX) / 10)
-                    let stepY = max(1, (maxPY - minPY) / 14)
+        let startX = max(0, min(width - 1, Int(userBoxInCrop.minX * Double(width))))
+        let endX = max(startX, min(width - 1, Int(userBoxInCrop.maxX * Double(width))))
+        let startY = max(0, min(height - 1, Int(userBoxInCrop.minY * Double(height))))
+        let endY = max(startY, min(height - 1, Int(userBoxInCrop.maxY * Double(height))))
 
-                    for py in stride(from: minPY, through: maxPY, by: stepY) {
-                        for px in stride(from: minPX, through: maxPX, by: stepX) {
-                            let val = Int(buffer[py * bytesPerRow + px])
-                            if val > 0 && observation.allInstances.contains(val) {
-                                indices.insert(val)
-                            }
-                        }
+        for y in 0..<height {
+            let rowStart = y * bytesPerRow
+            let isInsideY = (y >= startY && y <= endY)
+            for x in 0..<width {
+                let val = Int(buffer[rowStart + x])
+                if val > 0 && observation.allInstances.contains(val) {
+                    instanceCountsTotal[val, default: 0] += 1
+                    if isInsideY && (x >= startX && x <= endX) {
+                        instanceCountsInUserBox[val, default: 0] += 1
                     }
                 }
             }
         }
 
-        if let primary = findInstanceIndex(in: observation, atX: x, y: y) {
-            indices.insert(primary)
+        var selected = IndexSet()
+        for (instance, inBoxCount) in instanceCountsInUserBox {
+            let totalCount = instanceCountsTotal[instance, default: 1]
+            // An instance is included if it has prominent presence in the swiped area
+            // and is not merely an external neighbor that leaked over the outer edge border
+            if inBoxCount >= 6 && Double(inBoxCount) / Double(totalCount) >= 0.20 {
+                selected.insert(instance)
+            }
         }
 
-        return indices
+        // Fallback: if no instance passed the ratio check, pick instance closest to the center
+        if selected.isEmpty {
+            let midX = max(0, min(width - 1, Int(userBoxInCrop.midX * Double(width))))
+            let midY = max(0, min(height - 1, Int(userBoxInCrop.midY * Double(height))))
+            let centerVal = Int(buffer[midY * bytesPerRow + midX])
+            if centerVal > 0 && observation.allInstances.contains(centerVal) {
+                selected.insert(centerVal)
+            } else {
+                let maxR = min(8, min(width / 8, height / 8))
+                for r in 1...maxR {
+                    for dy in -r...r {
+                        for dx in -r...r {
+                            let px = midX + dx
+                            let py = midY + dy
+                            if px >= 0 && px < width && py >= 0 && py < height {
+                                let val = Int(buffer[py * bytesPerRow + px])
+                                if val > 0 && observation.allInstances.contains(val) {
+                                    selected.insert(val)
+                                    break
+                                }
+                            }
+                        }
+                        if !selected.isEmpty { break }
+                    }
+                    if !selected.isEmpty { break }
+                }
+            }
+        }
+
+        return selected.isEmpty ? observation.allInstances : selected
     }
 
     /// Finds the individual foreground instance index at normalized coordinates (0...1, top-left origin)
@@ -719,8 +744,9 @@ final class IOSObjectDetectorService: Sendable {
             return directVal
         }
 
-        // 2. Expanding radial search to catch touches on borders/rims of small items (up to 20 pixels in mask space)
-        let maxRadius = min(20, min(width / 4, height / 4))
+        // 2. Tight radial search (up to 8 pixels) to catch touches on borders/rims of small items
+        // Keeping radius tight prevents jumping across empty space to neighboring objects
+        let maxRadius = min(8, min(width / 16, height / 16))
         for r in 1...maxRadius {
             for dy in -r...r {
                 for dx in -r...r {
@@ -742,10 +768,125 @@ final class IOSObjectDetectorService: Sendable {
 
     // MARK: - Contour & Silhouette Detection
 
-    /// Detects the curved borders, corners, and contours of the physical object inside the cropped image
-    private func extractContourLoops(for cgImage: CGImage) -> [[CGPoint]] {
+    /// Extracts precise silhouette contours directly from the cutout's alpha channel.
+    /// By rendering a pure binary white-on-black mask, Vision detects the TRUE outer perimeter
+    /// of the physical object without any internal texture edges or luminance confusion.
+    private func extractSilhouetteContourLoops(
+        from cutoutCG: CGImage?,
+        fallbackCrop: CGImage
+    ) -> [[CGPoint]] {
+        if let cutout = cutoutCG, let contours = extractContoursFromAlphaSilhouette(cutout), !contours.isEmpty {
+            return contours
+        }
+        return extractContoursFromGrayscale(fallbackCrop)
+    }
+
+    /// Renders the alpha channel of cutoutCG into a pure binary mask (solid white object on black background)
+    /// and uses VNDetectContoursRequest to extract the exact outer perimeter curves.
+    private func extractContoursFromAlphaSilhouette(_ cutoutCG: CGImage) -> [[CGPoint]]? {
+        let canvasDim = 256
+        let inset = 2
+        let drawDim = canvasDim - (inset * 2)
+
+        var pixels = [UInt8](repeating: 0, count: canvasDim * canvasDim * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: canvasDim,
+            height: canvasDim,
+            bitsPerComponent: 8,
+            bytesPerRow: canvasDim * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        // Draw cutout inset by 2px so contours are guaranteed closed and don't touch image bounds
+        ctx.draw(cutoutCG, in: CGRect(x: inset, y: inset, width: drawDim, height: drawDim))
+
+        // Convert to pure binary silhouette: white (alpha > 30) vs black (alpha <= 30)
+        for y in 0..<canvasDim {
+            let rowOffset = y * canvasDim * 4
+            let isEdgeY = (y < inset || y >= canvasDim - inset)
+            for x in 0..<canvasDim {
+                let offset = rowOffset + (x * 4)
+                let isEdge = isEdgeY || (x < inset || x >= canvasDim - inset)
+                if isEdge {
+                    pixels[offset] = 0
+                    pixels[offset + 1] = 0
+                    pixels[offset + 2] = 0
+                    pixels[offset + 3] = 255
+                } else {
+                    let alpha = pixels[offset + 3]
+                    if alpha > 30 {
+                        pixels[offset] = 255
+                        pixels[offset + 1] = 255
+                        pixels[offset + 2] = 255
+                        pixels[offset + 3] = 255
+                    } else {
+                        pixels[offset] = 0
+                        pixels[offset + 1] = 0
+                        pixels[offset + 2] = 0
+                        pixels[offset + 3] = 255
+                    }
+                }
+            }
+        }
+
+        guard let binaryCG = ctx.makeImage() else { return nil }
+
+        let contourReq = VNDetectContoursRequest()
+        contourReq.contrastAdjustment = 1.0
+        contourReq.detectsDarkOnLight = false
+        contourReq.maximumImageDimension = 256
+
+        let handler = VNImageRequestHandler(cgImage: binaryCG, orientation: .up, options: [:])
+        guard (try? handler.perform([contourReq])) != nil,
+              let observation = contourReq.results?.first else {
+            return nil
+        }
+
+        var candidates: [(contour: VNContour, area: Double)] = []
+        for top in observation.topLevelContours {
+            let box = top.normalizedPath.boundingBox
+            if box.width > 0.95 && box.height > 0.95 {
+                for child in top.childContours {
+                    let cBox = child.normalizedPath.boundingBox
+                    let area = Double(cBox.width * cBox.height)
+                    if child.pointCount >= 6 && area >= 0.015 {
+                        candidates.append((child, area))
+                    }
+                }
+            } else {
+                let area = Double(box.width * box.height)
+                if top.pointCount >= 6 && area >= 0.015 {
+                    candidates.append((top, area))
+                }
+            }
+        }
+
+        guard !candidates.isEmpty else { return nil }
+        candidates.sort { $0.area > $1.area }
+
+        var loops: [[CGPoint]] = []
+        for (contour, _) in candidates.prefix(2) {
+            let pts: [CGPoint] = contour.normalizedPoints.map { pt in
+                // Map from 2px-inset canvas space back to normalized 0...1 of cutoutCG
+                let origX = max(0.0, min(1.0, (Double(pt.x) * Double(canvasDim) - Double(inset)) / Double(drawDim)))
+                let origY = max(0.0, min(1.0, (Double(pt.y) * Double(canvasDim) - Double(inset)) / Double(drawDim)))
+                return CGPoint(x: origX, y: origY)
+            }
+            if pts.count >= 6 {
+                loops.append(pts)
+            }
+        }
+
+        return loops.isEmpty ? nil : loops
+    }
+
+    /// Fallback contour extraction from grayscale image
+    private func extractContoursFromGrayscale(_ cgImage: CGImage) -> [[CGPoint]] {
         let contourRequest = VNDetectContoursRequest()
-        contourRequest.contrastAdjustment = 1.6
+        contourRequest.contrastAdjustment = 1.5
         contourRequest.detectsDarkOnLight = false
 
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
@@ -754,29 +895,33 @@ final class IOSObjectDetectorService: Sendable {
             return []
         }
 
-        var loops: [[CGPoint]] = []
-
+        var candidates: [(contour: VNContour, area: Double)] = []
         for top in observation.topLevelContours {
             let box = top.normalizedPath.boundingBox
             if box.width > 0.94 && box.height > 0.94 {
                 for child in top.childContours {
-                    if child.pointCount >= 8 {
-                        let pts = child.normalizedPoints.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
-                        loops.append(pts)
+                    let cBox = child.normalizedPath.boundingBox
+                    let area = Double(cBox.width * cBox.height)
+                    if child.pointCount >= 6 && area >= 0.02 {
+                        candidates.append((child, area))
                     }
                 }
-            } else if top.pointCount >= 8 {
-                let pts = top.normalizedPoints.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
-                loops.append(pts)
+            } else {
+                let area = Double(box.width * box.height)
+                if top.pointCount >= 6 && area >= 0.02 {
+                    candidates.append((top, area))
+                }
             }
         }
 
-        return Array(loops.prefix(3))
+        candidates.sort { $0.area > $1.area }
+        return candidates.prefix(2).map { item in
+            item.contour.normalizedPoints.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
+        }
     }
 
     /// Separates the subject from the background using Apple Foreground Instance Masking (iOS 17+)
     /// and extracts geometric metrics (center of mass and tight bounding box) of the cutoff subject.
-    /// Prioritizes the central item in the crop over any surrounding background items.
     private func extractForegroundCutout(
         for cgImage: CGImage,
         includeAllInstances: Bool = false
@@ -790,7 +935,6 @@ final class IOSObjectDetectorService: Sendable {
                 return (nil, nil)
             }
 
-            // When user swiped a lasso around a large object, include all instances inside the crop so the bottom part is never cut off
             let selectedInstances: IndexSet
             if includeAllInstances {
                 selectedInstances = result.allInstances

@@ -1023,14 +1023,16 @@ struct InteractiveSceneImageViewerSheet: View {
                                     }
 
                                     // Lasso Mode: Draw glowing laser line to circle and cut out items
-                                    if lassoPoints.isEmpty {
-                                        lassoPoints.append(value.startLocation)
-                                    }
-
-                                    let dist = hypot(value.location.x - value.startLocation.x, value.location.y - value.startLocation.y)
-                                    if dist > 6 {
+                                    if !isDrawingLasso {
                                         isDrawingLasso = true
-                                        lassoPoints.append(value.location)
+                                        lassoPoints = [value.startLocation, value.location]
+                                        activeLiftedCrop = nil
+                                        selectedObject = nil
+                                    } else {
+                                        let dist = hypot(value.location.x - value.startLocation.x, value.location.y - value.startLocation.y)
+                                        if dist > 4 {
+                                            lassoPoints.append(value.location)
+                                        }
                                     }
                                 }
                                 .onEnded { value in
@@ -1051,22 +1053,24 @@ struct InteractiveSceneImageViewerSheet: View {
                                         return
                                     }
 
-                                    let xs = lassoPoints.map { $0.x }
-                                    let ys = lassoPoints.map { $0.y }
+                                    let capturedPoints = lassoPoints
+                                    lassoPoints = []
+                                    isDrawingLasso = false
+
+                                    let xs = capturedPoints.map { $0.x }
+                                    let ys = capturedPoints.map { $0.y }
                                     let rawMinX = xs.min() ?? 0
                                     let rawMaxX = xs.max() ?? 0
                                     let rawMinY = ys.min() ?? 0
                                     let rawMaxY = ys.max() ?? 0
                                     let rawBoxW = rawMaxX - rawMinX
                                     let rawBoxH = rawMaxY - rawMinY
-                                    let totalDist = zip(lassoPoints, lassoPoints.dropFirst()).reduce(0.0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
+                                    let totalDist = zip(capturedPoints, capturedPoints.dropFirst()).reduce(0.0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
 
                                     if totalDist < 16 || (rawBoxW < 12 && rawBoxH < 12) {
                                         withAnimation {
                                             selectedObject = nil
                                         }
-                                        lassoPoints = []
-                                        isDrawingLasso = false
                                     } else {
                                         let minX = max(0, min(fittedRect.width, rawMinX))
                                         let maxX = max(minX + 1, min(fittedRect.width, rawMaxX))
@@ -1132,6 +1136,7 @@ struct InteractiveSceneImageViewerSheet: View {
                             .frame(width: 34, height: 34)
                             .contentShape(Circle())
                             .position(layout.targetPoint)
+                            .allowsHitTesting(!isLassoModeEnabled && !isDetectingObject)
                             .onTapGesture {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                                     selectedObject = item
@@ -1148,6 +1153,7 @@ struct InteractiveSceneImageViewerSheet: View {
 
                             calloutBadge(item: item, isSelected: isSelected, accentColor: accentColor)
                                 .position(layout.badgeCenter)
+                                .allowsHitTesting(!isLassoModeEnabled && !isDetectingObject)
                                 .onTapGesture {
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                                         selectedObject = item
@@ -2285,7 +2291,6 @@ struct LiftedCropObjectOverlayView: View {
             // 1. Cutout / Cropped Object Image with smooth rounded frame
             Image(uiImage: displayImage)
                 .resizable()
-                .scaledToFit()
                 .frame(width: max(20, cropState.rect.width), height: max(20, cropState.rect.height))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .contentShape(Rectangle())
