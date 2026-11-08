@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>ELEVENLABS_API_KEY</key>
-	<string></string>
+	<string>YOUR_ELEVENLABS_API_KEY</string>
 </dict>
 </plist>

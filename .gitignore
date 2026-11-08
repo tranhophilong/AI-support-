@@ -2,6 +2,7 @@
 !**/*.xcassets/**/*.png
 English Corrector/GeminiConfig.plist
 English Corrector/GroqConfig.plist
+English Corrector/ElevenLabsConfig.plist
 *.xcuserstate
 English Corrector.xcodeproj/project.xcworkspace/xcuserdata/
 English Corrector.xcodeproj/xcuserdata/*/xcdebugger/
