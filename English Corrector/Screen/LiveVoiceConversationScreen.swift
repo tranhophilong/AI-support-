@@ -207,6 +207,7 @@ struct LiveVoiceConversationScreen: View {
     @State private var silenceTimerTask: Task<Void, Never>?
     @State private var toastMessage = ""
     @State private var showToast = false
+    @State private var showVoiceStudio = false
 
     private var selectedAIModel: AIModelOption {
         AIModelOption(rawValue: selectedAIModelRawValue) ?? .groqGPTOSS20B
@@ -391,6 +392,9 @@ struct LiveVoiceConversationScreen: View {
                 fetchTranslationForCurrentAITurn(currentAISpokenLine)
             }
         }
+        .sheet(isPresented: $showVoiceStudio) {
+            AIVoiceStudioSheet()
+        }
     }
 
     // MARK: - Top Header Bar
@@ -419,6 +423,30 @@ struct LiveVoiceConversationScreen: View {
             }
 
             Spacer()
+
+            // AI Voice Studio Quick Selector
+            Button {
+                showVoiceStudio = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text(tts.currentVoiceProfile.accent.flagEmoji)
+                        .font(.caption2)
+                    Text(tts.currentVoiceProfile.name.components(separatedBy: " ").first ?? "Voice")
+                        .font(.caption.bold())
+                        .lineLimit(1)
+                    Image(systemName: "waveform")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(AppTheme.Primary.p700)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(AppTheme.Surface.card)
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
+                }
+            }
 
             // Speed Menu
             Menu {
@@ -1634,12 +1662,14 @@ private struct GradientWaveRibbonCanvas: View {
 
 struct VoiceRoleplayPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var tts = SpeechSynthesizerManager.shared
 
     let onSelectScenario: (VoiceRoleplayScenario) -> Void
 
     @State private var customTopicTitle = ""
     @State private var customTopicSituation = ""
     @State private var showCustomForm = false
+    @State private var showVoiceStudio = false
 
     var body: some View {
         NavigationStack {
@@ -1672,6 +1702,45 @@ struct VoiceRoleplayPickerSheet: View {
                         RoundedRectangle(cornerRadius: 16)
                             .strokeBorder(AppTheme.Surface.border, lineWidth: 1.2)
                     }
+
+                    // Current Active Voice Banner & Switch
+                    Button {
+                        showVoiceStudio = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(tts.currentVoiceProfile.accent.flagEmoji)
+                                .font(.title3)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 5) {
+                                    Text("Giọng AI đang nói:")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.Neutral.n500)
+                                    Text(tts.currentVoiceProfile.name)
+                                        .font(.caption.bold())
+                                        .foregroundStyle(AppTheme.Primary.p700)
+                                }
+                                Text("Chạm để đổi giọng hoặc tạo giọng tùy chỉnh qua mô tả / âm thanh")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(AppTheme.Neutral.n500)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold())
+                                .foregroundStyle(AppTheme.Neutral.n400)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(AppTheme.Primary.p50.opacity(0.7))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(AppTheme.Primary.p200, lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
 
                     // Custom Scenario Toggle
                     Button {
@@ -1811,6 +1880,9 @@ struct VoiceRoleplayPickerSheet: View {
                         dismiss()
                     }
                 }
+            }
+            .sheet(isPresented: $showVoiceStudio) {
+                AIVoiceStudioSheet()
             }
         }
     }

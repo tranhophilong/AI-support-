@@ -39,8 +39,11 @@ enum AppTheme {
     enum Primary {
         static let p50 = Color(lightHex: 0xEEF2FF, darkHex: 0x1E1B4B)
         static let p100 = Color(lightHex: 0xE0E7FF, darkHex: 0x312E81)
+        static let p200 = Color(lightHex: 0xC7D2FE, darkHex: 0x4338CA)
         static let p300 = Color(lightHex: 0xA5B4FC, darkHex: 0x818CF8)
+        static let p400 = Color(lightHex: 0x6366F1, darkHex: 0x818CF8)
         static let p500 = Color(lightHex: 0x4F46E5, darkHex: 0x6366F1)
+        static let p600 = Color(lightHex: 0x4338CA, darkHex: 0x6366F1)
         static let p700 = Color(lightHex: 0x4338CA, darkHex: 0x818CF8)
     }
 
@@ -79,9 +82,12 @@ enum AppTheme {
         static let n50 = Color(lightHex: 0xFAF5FF, darkHex: 0x18181B)
         static let n100 = Color(lightHex: 0xF5F5F4, darkHex: 0x121214)
         static let n200 = Color(lightHex: 0xE7E5E4, darkHex: 0x27272A)
+        static let n300 = Color(lightHex: 0xD6D3D1, darkHex: 0x3F3F46)
         static let n400 = Color(lightHex: 0x9CA3AF, darkHex: 0x71717A)
         static let n500 = Color(lightHex: 0x6B7280, darkHex: 0xA1A1AA)
+        static let n600 = Color(lightHex: 0x57534E, darkHex: 0xBEBDBA)
         static let n700 = Color(lightHex: 0x44403C, darkHex: 0xE4E4E7)
+        static let n800 = Color(lightHex: 0x292524, darkHex: 0xD6D3D1)
         static let n900 = Color(lightHex: 0x1C1917, darkHex: 0xF5F5F4)
     }
 
@@ -93,6 +99,7 @@ enum AppTheme {
     // Background: #F5F5F4 (Warm Stone) - Hạn chế ánh sáng xanh, tốt cho mắt vào buổi tối
     enum Surface {
         static let appBackground = Neutral.n100
+        static let background = appBackground
         static let appBackgroundAlt = Neutral.n50
         static let card = Color(lightHex: 0xFFFFFF, darkHex: 0x1C1C1F)
         static let cardMuted = Color(lightHex: 0xF5F5F4, darkHex: 0x27272A)

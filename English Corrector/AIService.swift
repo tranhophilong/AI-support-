@@ -1075,6 +1075,25 @@ enum APIKeyStore {
         return ""
     }
 
+    static var elevenLabsAPIKey: String {
+        // 1. User-configured custom key from Settings
+        if let userKey = UserDefaults.standard.string(forKey: "custom_elevenlabs_api_key"),
+           let cleanUserKey = normalizedAPIKey(userKey, keyName: "ELEVENLABS_API_KEY", placeholder: "YOUR_ELEVENLABS_API_KEY") {
+            return cleanUserKey
+        }
+
+        // 2. Bundled ElevenLabsConfig.plist or Info.plist or Environment
+        if let key = value(
+            for: "ELEVENLABS_API_KEY",
+            placeholder: "YOUR_ELEVENLABS_API_KEY",
+            configFileName: "ElevenLabsConfig"
+        ) {
+            return key
+        }
+
+        return ""
+    }
+
     private static func value(
         for keyName: String,
         placeholder: String,
