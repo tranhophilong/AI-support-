@@ -122,7 +122,7 @@ struct RootTabView: View {
         case .pronunciation:
             Image(systemName: "waveform.and.mic")
         case .askAI:
-            Image(systemName: "sparkles.bubble.fill")
+            Image(systemName: "questionmark.bubble.fill")
         case .structure:
             Image(systemName: "text.alignleft")
         case .notes:
