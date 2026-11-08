@@ -180,7 +180,7 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
         isLoadingVoiceAudio = false
         let utterance = AVSpeechUtterance(string: text)
 
-        // Strict English Voice Selection (Never allow non-English system voice)
+        // Strict English Voice Selection (Matching both Accent and Gender)
         var voiceToUse: AVSpeechSynthesisVoice?
 
         // 1. Check if the profile specifies a valid English system voice
@@ -189,64 +189,118 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
             voiceToUse = specificVoice
         }
 
-        // 2. Otherwise find the highest-quality native English voice available
+        // 2. Otherwise find the highest-quality native English voice with matching gender
         if voiceToUse == nil {
-            voiceToUse = bestAppleEnhancedVoice(for: currentVoiceProfile.accent.rawValue)
+            voiceToUse = bestAppleEnhancedVoice(
+                for: currentVoiceProfile.accent.rawValue,
+                gender: currentVoiceProfile.gender
+            )
         }
 
-        // 3. Absolute fallback must be en-US (Samantha/Alex), NEVER no-arg AVSpeechSynthesisVoice()
-        utterance.voice = voiceToUse ?? AVSpeechSynthesisVoice(language: "en-US") ?? AVSpeechSynthesisVoice(language: "en-GB")
+        utterance.voice = voiceToUse ?? (currentVoiceProfile.gender == .male ? maleFallbackVoice() : femaleFallbackVoice())
 
         let baseRate = AVSpeechUtteranceDefaultSpeechRate
-        let clampedRate = min(max(baseRate * rateMultiplier, 0.32), 0.62)
+        let clampedRate = min(max(baseRate * rateMultiplier * Float(currentVoiceProfile.speed), 0.32), 0.65)
         utterance.rate = clampedRate
-        utterance.pitchMultiplier = 1.0
+
+        // Natural pitch modulation based on profile gender
+        switch currentVoiceProfile.gender {
+        case .male:
+            utterance.pitchMultiplier = 0.90
+        case .female:
+            utterance.pitchMultiplier = 1.05
+        case .neutral:
+            utterance.pitchMultiplier = 1.0
+        }
 
         currentUtterance = utterance
         synthesizer.speak(utterance)
     }
 
-    private func bestAppleEnhancedVoice(for rawAccentCode: String) -> AVSpeechSynthesisVoice? {
+    private func bestAppleEnhancedVoice(
+        for rawAccentCode: String,
+        gender: AIVoiceGender
+    ) -> AVSpeechSynthesisVoice? {
         let targetCode = rawAccentCode.lowercased().hasPrefix("en") ? rawAccentCode : "en-US"
         let allVoices = AVSpeechSynthesisVoice.speechVoices()
         let englishVoices = allVoices.filter { $0.language.lowercased().hasPrefix("en") }
 
-        // 1. Exact dialect match (e.g. en-US) with Premium quality
-        if let premium = englishVoices.first(where: {
-            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame && $0.quality == .premium
-        }) {
-            return premium
+        let targetGenderInt = (gender == .male) ? 1 : ((gender == .female) ? 2 : 0)
+        let maleNames = ["aaron", "alex", "daniel", "gordon", "arthur", "fred", "oliver", "rishi"]
+        let femaleNames = ["samantha", "ava", "martha", "karen", "catherine", "nicky", "serena", "tessa", "moira"]
+
+        let isGenderMatch: (AVSpeechSynthesisVoice) -> Bool = { voice in
+            if gender == .neutral { return true }
+            if voice.gender.rawValue == targetGenderInt { return true }
+            let lower = voice.name.lowercased()
+            if gender == .male && maleNames.contains(where: { lower.contains($0) }) { return true }
+            if gender == .female && femaleNames.contains(where: { lower.contains($0) }) { return true }
+            return false
         }
 
-        // 2. Exact dialect match with Enhanced quality
-        if let enhanced = englishVoices.first(where: {
-            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame && $0.quality == .enhanced
+        // 1. Exact dialect + matching gender with Premium / Enhanced quality
+        if let highQuality = englishVoices.first(where: {
+            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame &&
+            ($0.quality == .premium || $0.quality == .enhanced) &&
+            isGenderMatch($0)
         }) {
-            return enhanced
+            return highQuality
         }
 
-        // 3. Known natural native English voices (Alex, Samantha, Ava, Daniel, Oliver, Serena)
-        let preferredNames = ["Alex", "Samantha", "Ava", "Daniel", "Oliver", "Serena"]
-        for name in preferredNames {
-            if let preferred = englishVoices.first(where: {
-                $0.name.localizedCaseInsensitiveContains(name) &&
-                $0.language.caseInsensitiveCompare(targetCode) == .orderedSame
+        // 2. Exact dialect + matching gender (Preferred named voices)
+        let preferredPool = (gender == .male) ? maleNames : femaleNames
+        for name in preferredPool {
+            if let matchedNamed = englishVoices.first(where: {
+                $0.language.caseInsensitiveCompare(targetCode) == .orderedSame &&
+                $0.name.lowercased().contains(name)
             }) {
-                return preferred
+                return matchedNamed
             }
         }
 
-        // 4. Any voice matching the specific English dialect
-        if let exactLang = englishVoices.first(where: {
-            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame
+        // 3. Any voice in the exact dialect with matching gender
+        if let dialectAndGender = englishVoices.first(where: {
+            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame &&
+            isGenderMatch($0)
         }) {
-            return exactLang
+            return dialectAndGender
         }
 
-        // 5. Standard en-US or en-GB fallback
-        return AVSpeechSynthesisVoice(language: "en-US")
-            ?? AVSpeechSynthesisVoice(language: "en-GB")
-            ?? englishVoices.first
+        // 4. Any English voice with matching gender cross-dialect
+        for name in preferredPool {
+            if let crossDialect = englishVoices.first(where: { $0.name.lowercased().contains(name) }) {
+                return crossDialect
+            }
+        }
+
+        if let anyEnglishMatchingGender = englishVoices.first(where: { isGenderMatch($0) }) {
+            return anyEnglishMatchingGender
+        }
+
+        // 5. Final fallback by gender
+        return (gender == .male) ? maleFallbackVoice() : femaleFallbackVoice()
+    }
+
+    private func maleFallbackVoice() -> AVSpeechSynthesisVoice? {
+        let all = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.lowercased().hasPrefix("en") }
+        let names = ["aaron", "alex", "daniel", "gordon", "arthur", "fred"]
+        for n in names {
+            if let v = all.first(where: { $0.name.lowercased().contains(n) }) {
+                return v
+            }
+        }
+        return all.first(where: { $0.gender.rawValue == 1 }) ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    private func femaleFallbackVoice() -> AVSpeechSynthesisVoice? {
+        let all = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.lowercased().hasPrefix("en") }
+        let names = ["samantha", "ava", "martha", "karen", "nicky"]
+        for n in names {
+            if let v = all.first(where: { $0.name.lowercased().contains(n) }) {
+                return v
+            }
+        }
+        return all.first(where: { $0.gender.rawValue == 2 }) ?? AVSpeechSynthesisVoice(language: "en-US")
     }
 
     private func configureAudioSessionForPlayback() {

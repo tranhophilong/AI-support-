@@ -266,47 +266,58 @@ public struct AIVoiceProfile: Identifiable, Codable, Equatable, Hashable {
     public static let curatedAppleVoices: [AIVoiceProfile] = [
         AIVoiceProfile(
             id: "apple_samantha",
-            name: "Samantha (Apple US Native)",
+            name: "Samantha (Apple US Female)",
             type: .appleSystem,
-            voiceId: "en-US",
+            voiceId: "com.apple.voice.compact.en-US.Samantha",
             gender: .female,
             accent: .american,
-            descriptionText: "Giọng nữ Mỹ bản xứ tiêu chuẩn tích hợp sẵn trên mọi thiết bị iOS.",
+            descriptionText: "Giọng nữ Mỹ tiêu chuẩn của iOS, phát âm chuẩn xác, rõ ràng.",
             samplePhrase: "Hello! I am ready to converse and practice speaking English with you.",
             expressivenessPreset: .conversational
         ),
         AIVoiceProfile(
-            id: "apple_ava",
-            name: "Ava (Apple Enhanced US)",
+            id: "apple_aaron",
+            name: "Aaron (Apple US Male)",
             type: .appleSystem,
-            voiceId: "com.apple.voice.enhanced.en-US.Ava",
-            gender: .female,
+            voiceId: "com.apple.ttsbundle.siri_Aaron_en-US_compact",
+            gender: .male,
             accent: .american,
-            descriptionText: "Giọng nữ Apple Neural Enhanced chất lượng cao, tự nhiên và mượt mà.",
-            samplePhrase: "Hi! I am ready to help you practice English anytime, even offline.",
+            descriptionText: "Giọng nam Mỹ Siri tự nhiên, giọng trầm nam tính, phát âm chuẩn xác.",
+            samplePhrase: "Hey there! Ready to practice your English conversational skills today?",
             expressivenessPreset: .conversational
         ),
         AIVoiceProfile(
             id: "apple_daniel",
-            name: "Daniel (Apple UK Native)",
+            name: "Daniel (Apple UK Male)",
             type: .appleSystem,
-            voiceId: "en-GB",
+            voiceId: "com.apple.voice.compact.en-GB.Daniel",
             gender: .male,
             accent: .british,
-            descriptionText: "Giọng nam Anh quốc chuẩn phát âm British RP tích hợp sẵn.",
+            descriptionText: "Giọng nam Anh quốc chuẩn phát âm British RP, ngữ điệu lịch thiệp.",
             samplePhrase: "Good day. Shall we practice speaking some English together now?",
             expressivenessPreset: .teacher
         ),
         AIVoiceProfile(
-            id: "apple_oliver",
-            name: "Oliver (Apple AU Native)",
+            id: "apple_karen",
+            name: "Karen (Apple AU Female)",
             type: .appleSystem,
-            voiceId: "en-AU",
-            gender: .male,
+            voiceId: "com.apple.voice.compact.en-AU.Karen",
+            gender: .female,
             accent: .australian,
-            descriptionText: "Giọng nam Úc tự nhiên, ngữ điệu thân thiện của Apple.",
+            descriptionText: "Giọng nữ Úc tự nhiên, ngữ điệu thân thiện tích hợp sẵn trên iOS.",
             samplePhrase: "G'day! Let's get started with your English speaking practice.",
             expressivenessPreset: .conversational
+        ),
+        AIVoiceProfile(
+            id: "apple_gordon",
+            name: "Gordon (Apple AU Male)",
+            type: .appleSystem,
+            voiceId: "com.apple.ttsbundle.siri_Gordon_en-AU_compact",
+            gender: .male,
+            accent: .australian,
+            descriptionText: "Giọng nam Úc Siri tự nhiên, thân thiện và năng động.",
+            samplePhrase: "G'day mate! Let's practice speaking fluent English together.",
+            expressivenessPreset: .dynamic
         )
     ]
 

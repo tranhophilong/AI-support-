@@ -10,12 +10,21 @@ struct AIVoiceStudioSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @ObservedObject private var tts = SpeechSynthesizerManager.shared
+    @AppStorage("custom_elevenlabs_api_key") private var storedCustomKey: String = ""
     @State private var customVoices: [AIVoiceProfile] = []
     @State private var selectedVoice: AIVoiceProfile = VoiceProfileStorage.loadSelectedVoice()
 
     @State private var isCreateSheetPresented = false
     @State private var isAPIKeyAlertPresented = false
     @State private var apiKeyInput = ""
+
+    private var hasActiveKey: Bool {
+        let trimmed = storedCustomKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && trimmed != "YOUR_ELEVENLABS_API_KEY" {
+            return true
+        }
+        return !APIKeyStore.elevenLabsAPIKey.isEmpty
+    }
 
     // Voice Tuning
     @State private var selectedPreset: VoiceExpressivenessPreset = .conversational
@@ -101,7 +110,7 @@ struct AIVoiceStudioSheet: View {
 
     // MARK: - API Key Banner
     private var apiKeyBannerCard: some View {
-        let hasKey = !APIKeyStore.elevenLabsAPIKey.isEmpty
+        let hasKey = hasActiveKey
 
         return HStack(spacing: 12) {
             Image(systemName: hasKey ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
@@ -109,11 +118,11 @@ struct AIVoiceStudioSheet: View {
                 .foregroundStyle(hasKey ? AppTheme.Semantic.success : AppTheme.Semantic.warning)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(hasKey ? "ElevenLabs AI Engine: Đang hoạt động" : "Chưa cấu hình ElevenLabs API Key")
+                Text(hasKey ? "ElevenLabs AI Engine: Đang hoạt động" : "Chưa có ElevenLabs API Key")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(AppTheme.Neutral.n900)
 
-                Text(hasKey ? "Sẵn sàng tạo giọng từ mô tả, clone âm thanh và nhấn nhá bản xứ." : "Chạm để nhập API Key riêng hoặc sử dụng dàn giọng Apple Enhanced miễn phí.")
+                Text(hasKey ? "Sẵn sàng tạo giọng từ mô tả, clone âm thanh và nhấn nhá bản xứ." : "Giọng đang được phát mô phỏng qua Apple TTS theo đúng giới tính & ngữ điệu.")
                     .font(.system(size: 11))
                     .foregroundStyle(AppTheme.Neutral.n600)
             }
@@ -121,7 +130,7 @@ struct AIVoiceStudioSheet: View {
             Spacer()
 
             Button {
-                apiKeyInput = UserDefaults.standard.string(forKey: "custom_elevenlabs_api_key") ?? ""
+                apiKeyInput = storedCustomKey.isEmpty ? (UserDefaults.standard.string(forKey: "custom_elevenlabs_api_key") ?? "") : storedCustomKey
                 isAPIKeyAlertPresented = true
             } label: {
                 Text(hasKey ? "Đổi Key" : "Nhập Key")
@@ -220,6 +229,18 @@ struct AIVoiceStudioSheet: View {
                 Text("Giọng Bản Xứ Tuyển Chọn (ElevenLabs)")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(AppTheme.Neutral.n900)
+            }
+
+            if !hasActiveKey {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.Semantic.warning)
+                    Text("Chưa có ElevenLabs Key: Đang phát mô phỏng giọng nam/nữ Apple chuẩn.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppTheme.Neutral.n600)
+                }
+                .padding(.horizontal, 4)
             }
 
             VStack(spacing: 8) {
@@ -407,6 +428,20 @@ struct AIVoiceStudioSheet: View {
                     }
                 }
 
+                HStack(spacing: 5) {
+                    Text(voice.gender.displayName)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(voice.gender == .male ? Color.blue : Color.pink)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background((voice.gender == .male ? Color.blue : Color.pink).opacity(0.12))
+                        .clipShape(Capsule())
+
+                    Text(voice.accent.displayName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(AppTheme.Neutral.n600)
+                }
+
                 Text(voice.descriptionText)
                     .font(.system(size: 11))
                     .foregroundStyle(AppTheme.Neutral.n500)
@@ -511,8 +546,8 @@ struct AIVoiceStudioSheet: View {
             tts.stop()
         } else {
             tts.stop()
-            // Temporarily set active voice to play sample line
-            tts.setVoiceProfile(voice)
+            // Select and sync tuning state to match this voice
+            selectVoice(voice)
             tts.speak(voice.samplePhrase)
         }
     }
@@ -522,6 +557,7 @@ struct AIVoiceStudioSheet: View {
             tts.stop()
             isTestingVoice = false
         } else {
+            tts.stop()
             isTestingVoice = true
             tts.speakWithCallback(selectedVoice.samplePhrase) {
                 self.isTestingVoice = false
