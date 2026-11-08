@@ -86,21 +86,21 @@ struct RootTabView: View {
                             coordinator.selectedTab = tab
                         }
                     } label: {
-                        VStack(spacing: 3) {
+                        VStack(spacing: 2) {
                             tabIcon(for: tab, isSelected: isSelected)
                                 .foregroundStyle(isSelected ? AppTheme.Primary.p500 : AppTheme.Neutral.n400)
-                                .scaleEffect(isSelected ? 1.08 : 1.0)
-                                .animation(.spring(response: 0.25, dampingFraction: 0.65), value: isSelected)
+                                .scaleEffect(isSelected ? 1.04 : 1.0)
+                                .animation(.spring(response: 0.22, dampingFraction: 0.7), value: isSelected)
 
                             Text(tabTitle(for: tab))
-                                .font(.system(size: 10, weight: isSelected ? .bold : .medium))
+                                .font(.system(size: 9, weight: isSelected ? .semibold : .regular))
                                 .foregroundStyle(isSelected ? AppTheme.Primary.p600 : AppTheme.Neutral.n400)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 6)
-                        .padding(.bottom, 4)
+                        .padding(.top, 4)
+                        .padding(.bottom, 2)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -124,35 +124,35 @@ struct RootTabView: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 21, height: 21)
+                .frame(width: 17, height: 17)
         case .pronunciation:
             Image(systemName: isSelected ? "waveform.badge.sparkle" : "waveform.and.mic")
-                .font(.system(size: 19, weight: isSelected ? .bold : .medium))
-                .frame(width: 21, height: 21)
+                .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                .frame(width: 17, height: 17)
         case .askAI:
             Image("ask_nav_icon")
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 21, height: 21)
+                .frame(width: 17, height: 17)
         case .structure:
             Image("structure_nav_icon")
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 21, height: 21)
+                .frame(width: 17, height: 17)
         case .notes:
             Image("note_nav_icon")
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 21, height: 21)
+                .frame(width: 17, height: 17)
         case .vocabulary:
             Image("dictionary_nav_icon")
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 21, height: 21)
+                .frame(width: 17, height: 17)
         }
     }
 
