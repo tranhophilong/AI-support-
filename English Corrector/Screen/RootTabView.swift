@@ -9,48 +9,162 @@ import UIKit
 struct RootTabView: View {
     @AppStorage("appThemeMode") private var appThemeModeRawValue = AppThemeMode.light.rawValue
     @ObservedObject private var coordinator = StructureNavigationCoordinator.shared
+    @State private var isKeyboardVisible = false
 
     private var appThemeMode: AppThemeMode {
         AppThemeMode(rawValue: appThemeModeRawValue) ?? .light
     }
 
     var body: some View {
-        TabView(selection: $coordinator.selectedTab) {
-            ListConversationScreen()
-                .tabItem {
-                    Label("Chat", image: "chat_nav_icon")
-                }
-                .tag(AppTab.chat)
+        ZStack {
+            // Keep all 6 tab view hierarchies alive in memory to preserve scroll positions & navigation paths
+            ZStack {
+                ListConversationScreen()
+                    .opacity(coordinator.selectedTab == .chat ? 1 : 0)
+                    .allowsHitTesting(coordinator.selectedTab == .chat)
 
-            SituationAskScreen()
-                .tabItem {
-                    Label("Ask AI", image: "ask_nav_icon")
-                }
-                .tag(AppTab.askAI)
+                PronunciationPracticeScreen()
+                    .opacity(coordinator.selectedTab == .pronunciation ? 1 : 0)
+                    .allowsHitTesting(coordinator.selectedTab == .pronunciation)
 
-            SentenceStructureScreen()
-                .tabItem {
-                    Label("Structure", image: "structure_nav_icon")
-                }
-                .tag(AppTab.structure)
+                SituationAskScreen()
+                    .opacity(coordinator.selectedTab == .askAI ? 1 : 0)
+                    .allowsHitTesting(coordinator.selectedTab == .askAI)
 
-            NotedAIScreen()
-                .tabItem {
-                    Label("Notes", image: "note_nav_icon")
-                }
-                .tag(AppTab.notes)
+                SentenceStructureScreen()
+                    .opacity(coordinator.selectedTab == .structure ? 1 : 0)
+                    .allowsHitTesting(coordinator.selectedTab == .structure)
 
-            VocabularyNotesScreen()
-                .tabItem {
-                    Label("Vocabulary", image: "dictionary_nav_icon")
-                }
-                .tag(AppTab.vocabulary)
+                NotedAIScreen()
+                    .opacity(coordinator.selectedTab == .notes ? 1 : 0)
+                    .allowsHitTesting(coordinator.selectedTab == .notes)
+
+                VocabularyNotesScreen()
+                    .opacity(coordinator.selectedTab == .vocabulary ? 1 : 0)
+                    .allowsHitTesting(coordinator.selectedTab == .vocabulary)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !coordinator.isTabBarHidden && !isKeyboardVisible {
+                customModernTabBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .tint(AppTheme.Primary.p500)
         .progressViewStyle(AppThemeProgressViewStyle())
         .preferredColorScheme(appThemeMode.colorScheme)
         .scrollDismissesKeyboard(.immediately)
         .background(GlobalKeyboardDismissInstaller())
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isKeyboardVisible = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isKeyboardVisible = false
+            }
+        }
+    }
+
+    // MARK: - Custom Modern Tab Bar (6 Tabs)
+
+    private var customModernTabBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(AppTheme.Surface.border.opacity(0.8))
+
+            HStack(spacing: 0) {
+                ForEach(AppTab.allCases, id: \.self) { tab in
+                    let isSelected = coordinator.selectedTab == tab
+
+                    Button {
+                        guard coordinator.selectedTab != tab else { return }
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            coordinator.selectedTab = tab
+                        }
+                    } label: {
+                        VStack(spacing: 3) {
+                            tabIcon(for: tab, isSelected: isSelected)
+                                .foregroundStyle(isSelected ? AppTheme.Primary.p500 : AppTheme.Neutral.n400)
+                                .scaleEffect(isSelected ? 1.08 : 1.0)
+                                .animation(.spring(response: 0.25, dampingFraction: 0.65), value: isSelected)
+
+                            Text(tabTitle(for: tab))
+                                .font(.system(size: 10, weight: isSelected ? .bold : .medium))
+                                .foregroundStyle(isSelected ? AppTheme.Primary.p600 : AppTheme.Neutral.n400)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 6)
+                        .padding(.bottom, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+        .background(
+            AppTheme.Surface.card
+                .opacity(0.96)
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    @ViewBuilder
+    private func tabIcon(for tab: AppTab, isSelected: Bool) -> some View {
+        switch tab {
+        case .chat:
+            Image("chat_nav_icon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+        case .pronunciation:
+            Image(systemName: isSelected ? "waveform.badge.sparkle" : "waveform.and.mic")
+                .font(.system(size: 19, weight: isSelected ? .bold : .medium))
+                .frame(width: 21, height: 21)
+        case .askAI:
+            Image("ask_nav_icon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+        case .structure:
+            Image("structure_nav_icon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+        case .notes:
+            Image("note_nav_icon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+        case .vocabulary:
+            Image("dictionary_nav_icon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+        }
+    }
+
+    private func tabTitle(for tab: AppTab) -> String {
+        switch tab {
+        case .chat: return "Chat"
+        case .pronunciation: return "Phát âm"
+        case .askAI: return "Hỏi AI"
+        case .structure: return "Cấu trúc"
+        case .notes: return "Ghi chú"
+        case .vocabulary: return "Từ vựng"
+        }
     }
 }
 

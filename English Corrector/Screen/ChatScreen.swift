@@ -576,7 +576,14 @@ struct ChatScreen: View {
         .onChange(of: message) { _, newValue in
             updateTypingSuggestions(for: newValue)
         }
+        .onAppear {
+            StructureNavigationCoordinator.shared.isTabBarHidden = !isTabBarVisible
+        }
+        .onChange(of: isTabBarVisible) { _, newValue in
+            StructureNavigationCoordinator.shared.isTabBarHidden = !newValue
+        }
         .onDisappear {
+            StructureNavigationCoordinator.shared.isTabBarHidden = false
             suggestionTask?.cancel()
             speechRecognizer.stopRecording()
             if !showLiveVoiceMode {

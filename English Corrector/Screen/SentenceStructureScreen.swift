@@ -21,12 +21,17 @@ final class StructureNavigationCoordinator: ObservableObject {
     static let shared = StructureNavigationCoordinator()
 
     @Published var selectedTab: AppTab = .chat
+    @Published var isTabBarHidden: Bool = false
     @Published var pendingSentenceToAnalyze: String?
     @Published var pendingConversationNavigation: PendingConversationNavigation?
     @Published var forceOpenMistakeSummarySection = false
     @Published var pendingMistakeCategoryToHighlight: String?
 
     private init() {}
+
+    func openPronunciation() {
+        selectedTab = .pronunciation
+    }
 
     func openAndAnalyze(_ sentence: String) {
         let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,8 +66,9 @@ final class StructureNavigationCoordinator: ObservableObject {
     }
 }
 
-enum AppTab: String, Hashable {
+enum AppTab: String, Hashable, CaseIterable {
     case chat
+    case pronunciation
     case askAI
     case structure
     case notes
