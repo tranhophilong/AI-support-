@@ -87,17 +87,34 @@ public actor ElevenLabsVoiceService {
             throw AIServiceError.missingAPIKey(provider: "ElevenLabs", keyName: "ELEVENLABS_API_KEY")
         }
 
-        let sample = textSample ?? "Hello there! It is great to converse with you in English today. How are you?"
+        // ElevenLabs requirement: voice_description must be 20 to 1000 characters
+        var safeDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if safeDescription.count < 20 {
+            safeDescription = "A natural, fluent native English speaker with pleasant tone: \(safeDescription)"
+        }
+        if safeDescription.count > 1000 {
+            safeDescription = String(safeDescription.prefix(1000))
+        }
+
+        // ElevenLabs requirement: text preview sample must be 100 to 1000 characters
+        var sample = (textSample?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+        if sample.count < 100 {
+            sample = "Hello there! It is wonderful to converse with you in English today. I hope you are having a productive and pleasant day learning new skills together."
+        }
+        if sample.count > 1000 {
+            sample = String(sample.prefix(1000))
+        }
+
         let url = baseURL.appendingPathComponent("text-to-voice/create-previews")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(key, forHTTPHeaderField: "xi-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 40
+        request.timeoutInterval = 45
 
         let body: [String: Any] = [
-            "voice_description": description,
+            "voice_description": safeDescription,
             "text": sample,
             "loudness": 0.5,
             "quality": 0.95
@@ -111,7 +128,7 @@ public actor ElevenLabsVoiceService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
+            let errorMsg = parseElevenLabsError(from: data, statusCode: httpResponse.statusCode)
             throw AIServiceError.requestFailed(provider: "ElevenLabs", statusCode: httpResponse.statusCode, message: errorMsg)
         }
 
@@ -154,6 +171,15 @@ public actor ElevenLabsVoiceService {
             throw AIServiceError.missingAPIKey(provider: "ElevenLabs", keyName: "ELEVENLABS_API_KEY")
         }
 
+        let safeName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom Voice" : name
+        var safeDesc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if safeDesc.count < 20 {
+            safeDesc = "A custom native English voice: \(safeDesc)"
+        }
+        if safeDesc.count > 1000 {
+            safeDesc = String(safeDesc.prefix(1000))
+        }
+
         let url = baseURL.appendingPathComponent("text-to-voice/create-voice-from-preview")
 
         var request = URLRequest(url: url)
@@ -162,16 +188,17 @@ public actor ElevenLabsVoiceService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: Any] = [
-            "voice_name": name,
-            "voice_description": description,
+            "voice_name": safeName,
+            "voice_description": safeDesc,
             "generated_voice_id": generatedVoiceId
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let msg = String(data: data, encoding: .utf8) ?? "Không thể lưu giọng từ mẫu xem trước"
+            let msg = parseElevenLabsError(from: data, statusCode: statusCode)
             throw AIServiceError.apiError(provider: "ElevenLabs", message: msg)
         }
 
@@ -181,6 +208,22 @@ public actor ElevenLabsVoiceService {
         }
 
         return voiceId
+    }
+
+    private func parseElevenLabsError(from data: Data, statusCode: Int) -> String {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let detailArray = json["detail"] as? [[String: Any]] {
+                let msgs = detailArray.compactMap { $0["msg"] as? String }
+                if !msgs.isEmpty {
+                    return msgs.joined(separator: ", ")
+                }
+            } else if let detailString = json["detail"] as? String {
+                return detailString
+            } else if let message = json["message"] as? String {
+                return message
+            }
+        }
+        return String(data: data, encoding: .utf8) ?? "HTTP \(statusCode)"
     }
 
     // MARK: - 3. Instant Voice Cloning (From Recorded Audio / Sound File)
