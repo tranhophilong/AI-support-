@@ -88,13 +88,13 @@ struct RootTabView: View {
                     } label: {
                         VStack(spacing: 2) {
                             tabIcon(for: tab, isSelected: isSelected)
-                                .foregroundStyle(isSelected ? AppTheme.Primary.p500 : AppTheme.Neutral.n400)
-                                .scaleEffect(isSelected ? 1.04 : 1.0)
+                                .foregroundStyle(isSelected ? AppTheme.Primary.p500 : AppTheme.Neutral.n500)
+                                .scaleEffect(isSelected ? 1.05 : 1.0)
                                 .animation(.spring(response: 0.22, dampingFraction: 0.7), value: isSelected)
 
                             Text(tabTitle(for: tab))
-                                .font(.system(size: 9, weight: isSelected ? .semibold : .regular))
-                                .foregroundStyle(isSelected ? AppTheme.Primary.p600 : AppTheme.Neutral.n400)
+                                .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
+                                .foregroundStyle(isSelected ? AppTheme.Primary.p600 : AppTheme.Neutral.n600)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
@@ -120,39 +120,29 @@ struct RootTabView: View {
     private func tabIcon(for tab: AppTab, isSelected: Bool) -> some View {
         switch tab {
         case .chat:
-            Image("chat_nav_icon")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 17, height: 17)
+            Image(systemName: isSelected ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.bubble.right")
+                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
+                .frame(width: 18, height: 18)
         case .pronunciation:
             Image(systemName: isSelected ? "waveform.badge.sparkle" : "waveform.and.mic")
-                .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
-                .frame(width: 17, height: 17)
+                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
+                .frame(width: 18, height: 18)
         case .askAI:
-            Image("ask_nav_icon")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 17, height: 17)
+            Image(systemName: isSelected ? "sparkles.bubble.fill" : "sparkles.bubble")
+                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
+                .frame(width: 18, height: 18)
         case .structure:
-            Image("structure_nav_icon")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 17, height: 17)
+            Image(systemName: isSelected ? "character.cursor.ibeam" : "text.alignleft")
+                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
+                .frame(width: 18, height: 18)
         case .notes:
-            Image("note_nav_icon")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 17, height: 17)
+            Image(systemName: isSelected ? "note.text" : "square.and.pencil")
+                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
+                .frame(width: 18, height: 18)
         case .vocabulary:
-            Image("dictionary_nav_icon")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 17, height: 17)
+            Image(systemName: isSelected ? "character.book.closed.fill" : "character.book.closed")
+                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
+                .frame(width: 18, height: 18)
         }
     }
 

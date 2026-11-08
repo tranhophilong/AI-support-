@@ -38,6 +38,11 @@ struct PronunciationPracticeScreen: View {
 
     // Quick Sentence Check State
     @State private var sentenceInput: String = "Could you please tell me how to get to the airport?"
+    @State private var currentSentenceTranslation: String = "Bạn có thể chỉ giúp tôi đường đến sân bay được không?"
+    @State private var currentSentenceFocus: String = "Lưu ý âm đuôi /z/ ở 'please' và trọng âm đầu 'air-port'"
+    @State private var selectedSentenceCategory: PracticeCategory = .all
+    @State private var isGeneratingAISentence: Bool = false
+    @State private var diceRotationAngle: Double = 0
     @State private var recordedSpokenText: String = ""
     @State private var isAssessingSentence: Bool = false
     @State private var assessmentResult: PronunciationAssessmentResult?
@@ -60,14 +65,6 @@ struct PronunciationPracticeScreen: View {
     @AppStorage("pronunciation_total_drilled_count") private var totalDrilledCount: Int = 18
     @AppStorage("pronunciation_avg_score") private var averageScore: Int = 84
     @AppStorage("pronunciation_day_streak") private var dayStreak: Int = 3
-
-    private let sampleSentences: [String] = [
-        "Could you please tell me how to get to the airport?",
-        "I am really looking forward to meeting you tomorrow.",
-        "Practice makes perfect when learning English pronunciation.",
-        "I'd like to make a reservation for two people at seven.",
-        "Thank you so much for your thoughtful advice and support."
-    ]
 
     var body: some View {
         NavigationStack {
@@ -295,61 +292,142 @@ struct PronunciationPracticeScreen: View {
     private var quickSentenceCheckSection: some View {
         VStack(spacing: 16) {
             // Text Input Card
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("Câu tiếng Anh cần luyện", systemImage: "text.quote")
+            VStack(alignment: .leading, spacing: 12) {
+                // Top Action Bar
+                HStack(spacing: 6) {
+                    Label("Câu luyện nói", systemImage: "text.quote")
                         .font(.caption.bold())
                         .foregroundStyle(AppTheme.Primary.p600)
 
                     Spacer()
 
+                    // Random sentence button
                     Button {
-                        playCurrentSentenceAudio(slow: false)
+                        pickRandomSentence()
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "speaker.wave.2.fill")
-                            Text("Nghe mẫu")
+                            Image(systemName: "dice.fill")
+                                .rotationEffect(.degrees(diceRotationAngle))
+                            Text("Random câu")
+                        }
+                        .font(.caption2.bold())
+                        .foregroundStyle(AppTheme.Accent.a600)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(AppTheme.Accent.a50)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    // AI Generate Button
+                    Button {
+                        generateAISentence()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isGeneratingAISentence {
+                                ProgressView()
+                                    .scaleEffect(0.65)
+                            } else {
+                                Image(systemName: "sparkles")
+                            }
+                            Text("AI Gợi ý")
                         }
                         .font(.caption2.bold())
                         .foregroundStyle(AppTheme.Primary.p600)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
                         .background(AppTheme.Primary.p50)
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .disabled(isGeneratingAISentence)
+
+                    // Play Native Model Audio Button
+                    Button {
+                        playCurrentSentenceAudio(slow: false)
+                    } label: {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Primary.p600)
+                            .padding(6)
+                            .background(AppTheme.Primary.p50)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
                 }
 
+                // Sentence Input Field
                 TextField("Nhập hoặc dán câu tiếng Anh...", text: $sentenceInput, axis: .vertical)
-                    .font(.body.weight(.medium))
+                    .font(.body.weight(.semibold))
                     .lineLimit(2...4)
                     .foregroundStyle(AppTheme.Neutral.n900)
                     .padding(10)
                     .background(AppTheme.Surface.cardMuted)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                // Suggestion chips
+                // Translation & Phonetic Tip Row
+                if !currentSentenceTranslation.isEmpty || !currentSentenceFocus.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if !currentSentenceTranslation.isEmpty {
+                            HStack(alignment: .top, spacing: 6) {
+                                Text("🇻🇳")
+                                    .font(.caption2)
+                                Text(currentSentenceTranslation)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Neutral.n700)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        if !currentSentenceFocus.isEmpty {
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: "target")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(AppTheme.Accent.a600)
+                                    .padding(.top, 2)
+                                Text(currentSentenceFocus)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(AppTheme.Accent.a600)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.Surface.cardMuted.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                // Category Selector Filter Bar
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Gợi ý câu mẫu phổ biến:")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(AppTheme.Neutral.n500)
+                    HStack {
+                        Text("Chủ đề câu:")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(AppTheme.Neutral.n500)
+                        Spacer()
+                    }
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(sampleSentences, id: \.self) { sample in
+                            ForEach(PracticeCategory.allCases) { cat in
+                                let isSelected = selectedSentenceCategory == cat
                                 Button {
-                                    sentenceInput = sample
-                                    assessmentResult = nil
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        selectedSentenceCategory = cat
+                                        pickRandomSentence(category: cat)
+                                    }
                                 } label: {
-                                    Text(sample)
-                                        .font(.caption2)
-                                        .foregroundStyle(sentenceInput == sample ? AppTheme.Primary.p600 : AppTheme.Neutral.n600)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(sentenceInput == sample ? AppTheme.Primary.p50 : AppTheme.Surface.card)
-                                        .clipShape(Capsule())
-                                        .overlay(Capsule().strokeBorder(AppTheme.Surface.border, lineWidth: 1))
+                                    HStack(spacing: 4) {
+                                        Image(systemName: cat.icon)
+                                            .font(.system(size: 9))
+                                        Text(cat.rawValue)
+                                            .font(.caption2.weight(isSelected ? .bold : .medium))
+                                    }
+                                    .foregroundStyle(isSelected ? .white : AppTheme.Neutral.n600)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(isSelected ? AppTheme.Primary.p500 : AppTheme.Surface.cardMuted)
+                                    .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -914,6 +992,307 @@ struct PronunciationPracticeScreen: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             self.activeVoiceConversation = conversation
         }
+    }
+
+    // MARK: - Random Sentence Generator & AI Sentence Generator
+
+    private func pickRandomSentence(category: PracticeCategory? = nil) {
+        let cat = category ?? selectedSentenceCategory
+        let pool = PracticeSentenceBank.sentences(for: cat)
+        guard let picked = pool.filter({ $0.english != sentenceInput }).randomElement() ?? pool.randomElement() else { return }
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            diceRotationAngle += 360
+            sentenceInput = picked.english
+            currentSentenceTranslation = picked.vietnamese
+            currentSentenceFocus = picked.phoneticFocus
+            assessmentResult = nil
+            assessmentErrorMessage = nil
+            recordedSpokenText = ""
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func generateAISentence() {
+        guard !isGeneratingAISentence else { return }
+        isGeneratingAISentence = true
+        assessmentResult = nil
+        assessmentErrorMessage = nil
+
+        Task {
+            let groqKey = APIKeyStore.groqAPIKey
+            let prompt = """
+            Generate 1 natural English sentence for pronunciation practice in category "\(selectedSentenceCategory.rawValue)".
+            Focus on common difficulties for Vietnamese learners (e.g. ending sounds /s/, /z/, /t/, -ed, consonant clusters, or word stress).
+            Return strict JSON only (no markdown, no extra text):
+            {
+              "english": "<1 natural English sentence between 6 and 14 words>",
+              "vietnamese": "<Vietnamese translation>",
+              "phoneticFocus": "<1 concise Vietnamese sentence pointing out key sounds to focus on>"
+            }
+            """
+
+            var newEnglish: String?
+            var newVietnamese: String?
+            var newFocus: String?
+
+            if !groqKey.isEmpty {
+                if let url = URL(string: "https://api.groq.com/openai/v1/chat/completions") {
+                    var req = URLRequest(url: url)
+                    req.httpMethod = "POST"
+                    req.setValue("Bearer \(groqKey)", forHTTPHeaderField: "Authorization")
+                    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    req.timeoutInterval = 8
+
+                    let body: [String: Any] = [
+                        "model": "openai/gpt-oss-20b",
+                        "messages": [
+                            ["role": "system", "content": "You are an English phonetics trainer. Output strict JSON only."],
+                            ["role": "user", "content": prompt]
+                        ],
+                        "temperature": 0.7,
+                        "response_format": ["type": "json_object"]
+                    ]
+
+                    if let bodyData = try? JSONSerialization.data(withJSONObject: body) {
+                        req.httpBody = bodyData
+                        if let (data, resp) = try? await URLSession.shared.data(for: req),
+                           let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let choices = json["choices"] as? [[String: Any]],
+                           let first = choices.first,
+                           let msg = first["message"] as? [String: Any],
+                           let content = msg["content"] as? String,
+                           let cData = content.data(using: .utf8),
+                           let parsed = try? JSONSerialization.jsonObject(with: cData) as? [String: Any] {
+                            newEnglish = parsed["english"] as? String
+                            newVietnamese = parsed["vietnamese"] as? String
+                            newFocus = parsed["phoneticFocus"] as? String
+                        }
+                    }
+                }
+            }
+
+            await MainActor.run {
+                self.isGeneratingAISentence = false
+                if let eng = newEnglish, !eng.isEmpty {
+                    withAnimation {
+                        self.sentenceInput = eng
+                        self.currentSentenceTranslation = newVietnamese ?? ""
+                        self.currentSentenceFocus = newFocus ?? "Luyện phát âm rõ âm đuôi và nhấn đúng trọng âm."
+                        self.recordedSpokenText = ""
+                    }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } else {
+                    // Fallback to local random
+                    self.pickRandomSentence()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Practice Sentences Dataset
+
+struct PracticeSentenceItem: Identifiable, Equatable {
+    let id = UUID()
+    let english: String
+    let vietnamese: String
+    let level: String
+    let phoneticFocus: String
+    let category: PracticeCategory
+}
+
+enum PracticeCategory: String, CaseIterable, Identifiable {
+    case all = "Tất cả"
+    case daily = "Hàng ngày"
+    case business = "Công việc"
+    case travel = "Du lịch"
+    case challenge = "Thử thách âm"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .all: return "sparkles"
+        case .daily: return "bubble.left.and.bubble.right.fill"
+        case .business: return "briefcase.fill"
+        case .travel: return "airplane"
+        case .challenge: return "flame.fill"
+        }
+    }
+}
+
+enum PracticeSentenceBank {
+    static let allSentences: [PracticeSentenceItem] = [
+        // Daily
+        PracticeSentenceItem(
+            english: "Could you please tell me how to get to the airport?",
+            vietnamese: "Bạn có thể chỉ giúp tôi đường đến sân bay được không?",
+            level: "A2",
+            phoneticFocus: "Lưu ý âm đuôi /z/ ở 'please' và trọng âm đầu 'air-port'",
+            category: .daily
+        ),
+        PracticeSentenceItem(
+            english: "I am really looking forward to meeting you tomorrow.",
+            vietnamese: "Tôi rất mong chờ được gặp bạn vào ngày mai.",
+            level: "B1",
+            phoneticFocus: "Nối âm 'looking forward' và nguyên âm đôi ở 'really'",
+            category: .daily
+        ),
+        PracticeSentenceItem(
+            english: "Practice makes perfect when learning English pronunciation.",
+            vietnamese: "Có công mài sắt có ngày nên kim khi học phát âm tiếng Anh.",
+            level: "B1",
+            phoneticFocus: "Âm đuôi /s/ ở 'makes' và trọng âm từ 'pro-nun-ci-A-tion'",
+            category: .daily
+        ),
+        PracticeSentenceItem(
+            english: "What are you planning to do this upcoming weekend?",
+            vietnamese: "Bạn có kế hoạch gì cho dịp cuối tuần sắp tới chưa?",
+            level: "A2",
+            phoneticFocus: "Âm /ð/ ở 'this' và trọng âm 'up-COM-ing'",
+            category: .daily
+        ),
+        PracticeSentenceItem(
+            english: "I usually take a quick walk in the park after dinner.",
+            vietnamese: "Tôi thường đi dạo nhanh trong công viên sau bữa tối.",
+            level: "A2",
+            phoneticFocus: "Âm /ʒ/ ở 'usually' và đuôi /k/ ở 'quick', 'park'",
+            category: .daily
+        ),
+        PracticeSentenceItem(
+            english: "Could you pass me the salt and pepper, please?",
+            vietnamese: "Bạn có thể chuyển giúp tôi lọ muối và tiêu được không?",
+            level: "A1",
+            phoneticFocus: "Âm /s/ ở 'pass', 'salt' và 'please'",
+            category: .daily
+        ),
+        PracticeSentenceItem(
+            english: "I love drinking a fresh cup of coffee every morning.",
+            vietnamese: "Tôi thích uống một tách cà phê thơm ngon vào mỗi buổi sáng.",
+            level: "A1",
+            phoneticFocus: "Âm /f/ ở 'fresh', 'coffee' và đuôi /p/ ở 'cup'",
+            category: .daily
+        ),
+
+        // Business
+        PracticeSentenceItem(
+            english: "Let's schedule a follow-up meeting for next Tuesday morning.",
+            vietnamese: "Chúng ta hãy lên lịch họp tiếp vào sáng thứ Ba tuần tới nhé.",
+            level: "B2",
+            phoneticFocus: "Trọng âm 'SCHE-dule' và âm /z/ ở 'Tuesday'",
+            category: .business
+        ),
+        PracticeSentenceItem(
+            english: "Could you walk me through the key highlights of the proposal?",
+            vietnamese: "Bạn có thể tóm tắt cho tôi các điểm nổi bật của bản đề xuất không?",
+            level: "B2",
+            phoneticFocus: "Âm cắn lưỡi /θ/ ở 'through' và đuôi /ts/ ở 'highlights'",
+            category: .business
+        ),
+        PracticeSentenceItem(
+            english: "We need to analyze customer feedback to improve our product.",
+            vietnamese: "Chúng ta cần phân tích phản hồi của khách hàng để cải tiến sản phẩm.",
+            level: "B1",
+            phoneticFocus: "Trọng âm 'AN-a-lyze' và đuôi /t/ ở 'product'",
+            category: .business
+        ),
+        PracticeSentenceItem(
+            english: "Thank you for taking the time to interview with us today.",
+            vietnamese: "Cảm ơn bạn đã dành thời gian tham gia phỏng vấn với chúng tôi hôm nay.",
+            level: "B1",
+            phoneticFocus: "Âm /θ/ ở 'thank', 'with' và trọng âm 'IN-ter-view'",
+            category: .business
+        ),
+        PracticeSentenceItem(
+            english: "Our team achieved outstanding results in the last quarter.",
+            vietnamese: "Đội ngũ của chúng ta đã đạt kết quả vượt bậc trong quý vừa qua.",
+            level: "B2",
+            phoneticFocus: "Đuôi -ed /d/ ở 'achieved' và trọng âm 'out-STAND-ing'",
+            category: .business
+        ),
+        PracticeSentenceItem(
+            english: "I appreciate your prompt assistance on this urgent project.",
+            vietnamese: "Tôi rất trân trọng sự hỗ trợ kịp thời của bạn về dự án khẩn này.",
+            level: "B2",
+            phoneticFocus: "Trọng âm 'ap-PRE-ci-ate' và âm /ʃ/ ở 'assistance'",
+            category: .business
+        ),
+
+        // Travel
+        PracticeSentenceItem(
+            english: "I'd like to make a reservation for two people at seven.",
+            vietnamese: "Tôi muốn đặt bàn cho hai người vào lúc 7 giờ.",
+            level: "A2",
+            phoneticFocus: "Trọng âm 'res-er-VA-tion' và âm /v/ ở 'seven'",
+            category: .travel
+        ),
+        PracticeSentenceItem(
+            english: "Excuse me, where can I find the baggage claim area?",
+            vietnamese: "Xin lỗi, tôi có thể tìm khu vực nhận hành lý ở đâu?",
+            level: "A2",
+            phoneticFocus: "Âm /s/ ở 'excuse' và âm /dʒ/ ở 'baggage'",
+            category: .travel
+        ),
+        PracticeSentenceItem(
+            english: "Could you recommend a traditional local restaurant nearby?",
+            vietnamese: "Bạn có thể giới thiệu một nhà hàng đặc sản địa phương gần đây không?",
+            level: "B1",
+            phoneticFocus: "Trọng âm 'rec-om-MEND' và 'tra-DI-tion-al'",
+            category: .travel
+        ),
+        PracticeSentenceItem(
+            english: "How much does a one-way ticket to downtown cost?",
+            vietnamese: "Một vé một chiều đến trung tâm thành phố giá bao nhiêu?",
+            level: "A2",
+            phoneticFocus: "Âm /z/ ở 'does' và đuôi /st/ ở 'cost'",
+            category: .travel
+        ),
+        PracticeSentenceItem(
+            english: "Is breakfast included in the room rate for our stay?",
+            vietnamese: "Bữa sáng đã bao gồm trong giá phòng của chúng tôi chưa?",
+            level: "A2",
+            phoneticFocus: "Đuôi -ed /ɪd/ ở 'included' và âm /eɪ/ ở 'rate'",
+            category: .travel
+        ),
+
+        // Challenge (Tongue Twisters & Complex Phonetics)
+        PracticeSentenceItem(
+            english: "She sells seashells by the seashore.",
+            vietnamese: "Cô ấy bán vỏ sò bên bờ biển.",
+            level: "C1",
+            phoneticFocus: "Luyện phân biệt /s/ vs /ʃ/ cực chuẩn",
+            category: .challenge
+        ),
+        PracticeSentenceItem(
+            english: "I thought a thought, but the thought I thought wasn't the thought I thought I thought.",
+            vietnamese: "Tôi nghĩ một ý nghĩ, nhưng ý nghĩ tôi nghĩ không phải ý nghĩ tôi nghĩ tôi nghĩ.",
+            level: "C1",
+            phoneticFocus: "Luyện âm cắn lưỡi /θ/ ở 'thought' liên tục",
+            category: .challenge
+        ),
+        PracticeSentenceItem(
+            english: "Peter Piper picked a peck of pickled peppers.",
+            vietnamese: "Peter Piper đã hái một đấu ớt muối.",
+            level: "C1",
+            phoneticFocus: "Luyện bật hơi phụ âm bật môi /p/ dứt khoát",
+            category: .challenge
+        ),
+        PracticeSentenceItem(
+            english: "Comfortable photographers photographed extraordinarily picturesque architecture.",
+            vietnamese: "Các nhiếp ảnh gia thoải mái đã chụp lại kiến trúc đẹp như tranh vẽ.",
+            level: "C1",
+            phoneticFocus: "Luyện trọng âm từ đa âm tiết khó (COMF-ter-ble, pho-TOG-ra-pher)",
+            category: .challenge
+        )
+    ]
+
+    static func sentences(for category: PracticeCategory) -> [PracticeSentenceItem] {
+        if category == .all {
+            return allSentences
+        }
+        return allSentences.filter { $0.category == category }
     }
 }
 
