@@ -455,6 +455,21 @@ struct PronunciationPracticeScreen: View {
                         .buttonStyle(.plain)
                     }
 
+                    if !recordedSpokenText.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "waveform")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Primary.p500)
+                            Text("AI nghe bạn đọc: \"\(recordedSpokenText)\"")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(AppTheme.Neutral.n700)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppTheme.Surface.cardMuted)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
                     Text("Chạm vào từng từ để xem phiên âm IPA và chỉnh khẩu hình:")
                         .font(.caption2)
                         .foregroundStyle(AppTheme.Neutral.n500)
@@ -488,6 +503,30 @@ struct PronunciationPracticeScreen: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+
+                    // Specific mistake breakdown
+                    let mistakeWords = result.words.filter { $0.level != .excellent && $0.errorDescription != nil }
+                    if !mistakeWords.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Các lỗi phát âm nhận diện:")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(AppTheme.Neutral.n700)
+
+                            ForEach(mistakeWords.prefix(3)) { errWord in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("•")
+                                        .foregroundStyle(errWord.level.color)
+                                    Text("\(errWord.word): \(errWord.errorDescription ?? "")")
+                                        .font(.caption2)
+                                        .foregroundStyle(AppTheme.Neutral.n800)
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppTheme.Surface.cardMuted)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
 
                     if !result.summaryFeedback.isEmpty {
@@ -778,7 +817,8 @@ struct PronunciationPracticeScreen: View {
         Task {
             let segments = speechRecognizer.latestSegments
             let result = await PronunciationAssessmentService.shared.assessPronunciation(
-                sentence: spoken,
+                targetSentence: sentenceInput,
+                spokenSentence: spoken,
                 acousticSegments: segments
             )
 

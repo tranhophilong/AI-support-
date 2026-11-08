@@ -197,14 +197,41 @@ public struct PronunciationDrillSheet: View {
                 // Word score pill
                 HStack(spacing: 4) {
                     Image(systemName: word.level.iconName)
-                    Text("\(word.score)%")
+                    Text("\(word.score)% • \(word.level.title)")
                 }
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(word.level.color)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(word.level.badgeBackgroundColor)
                 .clipShape(Capsule())
+            }
+
+            if word.level != .excellent {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(word.level.color)
+                        .padding(.top, 1)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lỗi nhận diện: \(word.errorType.labelVi)")
+                            .font(.caption.bold())
+                            .foregroundStyle(word.level.color)
+
+                        if let desc = word.errorDescription, !desc.isEmpty {
+                            Text(desc)
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppTheme.Neutral.n800)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(word.level.badgeBackgroundColor)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(word.level.color.opacity(0.3), lineWidth: 1))
             }
 
             // Syllables Breakdown with stress highlight

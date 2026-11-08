@@ -750,6 +750,21 @@ struct LiveVoiceConversationScreen: View {
                                 .buttonStyle(.plain)
                             }
                         }
+
+                        if let firstError = assessment.words.first(where: { $0.level != .excellent && $0.errorDescription != nil }) {
+                            HStack(alignment: .top, spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(firstError.level.color)
+                                    .padding(.top, 2)
+
+                                Text("\"\(firstError.word)\": \(firstError.errorDescription ?? "")")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.Neutral.n700)
+                                    .lineLimit(2)
+                            }
+                            .padding(.top, 2)
+                        }
                     }
                 } else {
                     HStack(spacing: 6) {
@@ -1338,7 +1353,7 @@ struct LiveVoiceConversationScreen: View {
             let acousticSegments = speechRecognizer.latestSegments
             Task {
                 let assessment = await PronunciationAssessmentService.shared.assessPronunciation(
-                    sentence: userText,
+                    spokenSentence: userText,
                     acousticSegments: acousticSegments
                 )
                 await MainActor.run {
