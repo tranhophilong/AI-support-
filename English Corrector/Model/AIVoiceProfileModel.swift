@@ -265,53 +265,53 @@ public struct AIVoiceProfile: Identifiable, Codable, Equatable, Hashable {
 
     public static let curatedAppleVoices: [AIVoiceProfile] = [
         AIVoiceProfile(
+            id: "apple_samantha",
+            name: "Samantha (Apple US Native)",
+            type: .appleSystem,
+            voiceId: "en-US",
+            gender: .female,
+            accent: .american,
+            descriptionText: "Giọng nữ Mỹ bản xứ tiêu chuẩn tích hợp sẵn trên mọi thiết bị iOS.",
+            samplePhrase: "Hello! I am ready to converse and practice speaking English with you.",
+            expressivenessPreset: .conversational
+        ),
+        AIVoiceProfile(
             id: "apple_ava",
             name: "Ava (Apple Enhanced US)",
             type: .appleSystem,
             voiceId: "com.apple.voice.enhanced.en-US.Ava",
             gender: .female,
             accent: .american,
-            descriptionText: "Giọng nữ Apple Neural Enhanced chất lượng cao, hoạt động ngoại tuyến.",
+            descriptionText: "Giọng nữ Apple Neural Enhanced chất lượng cao, tự nhiên và mượt mà.",
             samplePhrase: "Hi! I am ready to help you practice English anytime, even offline.",
             expressivenessPreset: .conversational
         ),
         AIVoiceProfile(
-            id: "apple_samantha",
-            name: "Samantha (Apple US)",
-            type: .appleSystem,
-            voiceId: "com.apple.voice.compact.en-US.Samantha",
-            gender: .female,
-            accent: .american,
-            descriptionText: "Giọng mặc định tiêu chuẩn iOS, ổn định và nhanh chóng.",
-            samplePhrase: "Hello. I will read and pronounce English sentences clearly for you.",
-            expressivenessPreset: .teacher
-        ),
-        AIVoiceProfile(
             id: "apple_daniel",
-            name: "Daniel (Apple Enhanced UK)",
+            name: "Daniel (Apple UK Native)",
             type: .appleSystem,
-            voiceId: "com.apple.voice.enhanced.en-GB.Daniel",
+            voiceId: "en-GB",
             gender: .male,
             accent: .british,
-            descriptionText: "Giọng nam Anh quốc chuẩn của Apple, hoạt động offline mượt mà.",
+            descriptionText: "Giọng nam Anh quốc chuẩn phát âm British RP tích hợp sẵn.",
             samplePhrase: "Good day. Shall we practice speaking some English together now?",
             expressivenessPreset: .teacher
         ),
         AIVoiceProfile(
             id: "apple_oliver",
-            name: "Oliver (Apple Enhanced AU)",
+            name: "Oliver (Apple AU Native)",
             type: .appleSystem,
-            voiceId: "com.apple.voice.enhanced.en-AU.Oliver",
+            voiceId: "en-AU",
             gender: .male,
             accent: .australian,
-            descriptionText: "Giọng nam Úc tự nhiên của hệ điều hành iOS.",
+            descriptionText: "Giọng nam Úc tự nhiên, ngữ điệu thân thiện của Apple.",
             samplePhrase: "G'day! Let's get started with your English speaking practice.",
             expressivenessPreset: .conversational
         )
     ]
 
     public static var defaultVoice: AIVoiceProfile {
-        // If ElevenLabs API Key exists, default to Adam; otherwise Ava (Apple Enhanced)
+        // If ElevenLabs API Key exists, default to Adam (ElevenLabs US Native); otherwise Samantha (Apple US Native)
         if !APIKeyStore.elevenLabsAPIKey.isEmpty {
             return curatedElevenLabsVoices[0]
         }

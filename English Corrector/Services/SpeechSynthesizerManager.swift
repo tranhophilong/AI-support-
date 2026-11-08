@@ -180,12 +180,22 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
         isLoadingVoiceAudio = false
         let utterance = AVSpeechUtterance(string: text)
 
-        // Try using the specific voice from the profile or find best Enhanced English voice
-        if let specificVoice = AVSpeechSynthesisVoice(identifier: currentVoiceProfile.voiceId) {
-            utterance.voice = specificVoice
-        } else {
-            utterance.voice = bestAppleEnhancedVoice(for: currentVoiceProfile.accent.rawValue)
+        // Strict English Voice Selection (Never allow non-English system voice)
+        var voiceToUse: AVSpeechSynthesisVoice?
+
+        // 1. Check if the profile specifies a valid English system voice
+        if let specificVoice = AVSpeechSynthesisVoice(identifier: currentVoiceProfile.voiceId),
+           specificVoice.language.lowercased().hasPrefix("en") {
+            voiceToUse = specificVoice
         }
+
+        // 2. Otherwise find the highest-quality native English voice available
+        if voiceToUse == nil {
+            voiceToUse = bestAppleEnhancedVoice(for: currentVoiceProfile.accent.rawValue)
+        }
+
+        // 3. Absolute fallback must be en-US (Samantha/Alex), NEVER no-arg AVSpeechSynthesisVoice()
+        utterance.voice = voiceToUse ?? AVSpeechSynthesisVoice(language: "en-US") ?? AVSpeechSynthesisVoice(language: "en-GB")
 
         let baseRate = AVSpeechUtteranceDefaultSpeechRate
         let clampedRate = min(max(baseRate * rateMultiplier, 0.32), 0.62)
@@ -196,21 +206,47 @@ final class SpeechSynthesizerManager: NSObject, ObservableObject, AVSpeechSynthe
         synthesizer.speak(utterance)
     }
 
-    private func bestAppleEnhancedVoice(for languageCode: String) -> AVSpeechSynthesisVoice {
+    private func bestAppleEnhancedVoice(for rawAccentCode: String) -> AVSpeechSynthesisVoice? {
+        let targetCode = rawAccentCode.lowercased().hasPrefix("en") ? rawAccentCode : "en-US"
         let allVoices = AVSpeechSynthesisVoice.speechVoices()
-        let matching = allVoices.filter { $0.language == languageCode }
+        let englishVoices = allVoices.filter { $0.language.lowercased().hasPrefix("en") }
 
-        // Prioritize premium or enhanced quality voices
-        if let premium = matching.first(where: { $0.quality == .premium }) {
+        // 1. Exact dialect match (e.g. en-US) with Premium quality
+        if let premium = englishVoices.first(where: {
+            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame && $0.quality == .premium
+        }) {
             return premium
         }
-        if let enhanced = matching.first(where: { $0.quality == .enhanced }) {
+
+        // 2. Exact dialect match with Enhanced quality
+        if let enhanced = englishVoices.first(where: {
+            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame && $0.quality == .enhanced
+        }) {
             return enhanced
         }
-        if let first = matching.first {
-            return first
+
+        // 3. Known natural native English voices (Alex, Samantha, Ava, Daniel, Oliver, Serena)
+        let preferredNames = ["Alex", "Samantha", "Ava", "Daniel", "Oliver", "Serena"]
+        for name in preferredNames {
+            if let preferred = englishVoices.first(where: {
+                $0.name.localizedCaseInsensitiveContains(name) &&
+                $0.language.caseInsensitiveCompare(targetCode) == .orderedSame
+            }) {
+                return preferred
+            }
         }
-        return AVSpeechSynthesisVoice(language: "en-US") ?? AVSpeechSynthesisVoice()
+
+        // 4. Any voice matching the specific English dialect
+        if let exactLang = englishVoices.first(where: {
+            $0.language.caseInsensitiveCompare(targetCode) == .orderedSame
+        }) {
+            return exactLang
+        }
+
+        // 5. Standard en-US or en-GB fallback
+        return AVSpeechSynthesisVoice(language: "en-US")
+            ?? AVSpeechSynthesisVoice(language: "en-GB")
+            ?? englishVoices.first
     }
 
     private func configureAudioSessionForPlayback() {
