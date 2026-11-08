@@ -82,15 +82,13 @@ struct RootTabView: View {
                         guard coordinator.selectedTab != tab else { return }
                         let generator = UIImpactFeedbackGenerator(style: .light)
                         generator.impactOccurred()
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            coordinator.selectedTab = tab
-                        }
+                        coordinator.selectedTab = tab
                     } label: {
-                        VStack(spacing: 2) {
+                        VStack(spacing: 3) {
                             tabIcon(for: tab, isSelected: isSelected)
+                                .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
                                 .foregroundStyle(isSelected ? AppTheme.Primary.p500 : AppTheme.Neutral.n500)
-                                .scaleEffect(isSelected ? 1.05 : 1.0)
-                                .animation(.spring(response: 0.22, dampingFraction: 0.7), value: isSelected)
+                                .frame(width: 24, height: 18)
 
                             Text(tabTitle(for: tab))
                                 .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
@@ -99,11 +97,11 @@ struct RootTabView: View {
                                 .minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
+                        .padding(.top, 5)
                         .padding(.bottom, 2)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(TabItemPressStyle())
                 }
             }
             .padding(.horizontal, 4)
@@ -120,29 +118,17 @@ struct RootTabView: View {
     private func tabIcon(for tab: AppTab, isSelected: Bool) -> some View {
         switch tab {
         case .chat:
-            Image(systemName: isSelected ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.bubble.right")
-                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
-                .frame(width: 18, height: 18)
+            Image(systemName: "bubble.left.and.bubble.right.fill")
         case .pronunciation:
-            Image(systemName: isSelected ? "waveform.badge.sparkle" : "waveform.and.mic")
-                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
-                .frame(width: 18, height: 18)
+            Image(systemName: "waveform.and.mic")
         case .askAI:
-            Image(systemName: isSelected ? "sparkles.bubble.fill" : "sparkles.bubble")
-                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
-                .frame(width: 18, height: 18)
+            Image(systemName: "sparkles.bubble.fill")
         case .structure:
-            Image(systemName: isSelected ? "character.cursor.ibeam" : "text.alignleft")
-                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
-                .frame(width: 18, height: 18)
+            Image(systemName: "text.alignleft")
         case .notes:
-            Image(systemName: isSelected ? "note.text" : "square.and.pencil")
-                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
-                .frame(width: 18, height: 18)
+            Image(systemName: "note.text")
         case .vocabulary:
-            Image(systemName: isSelected ? "character.book.closed.fill" : "character.book.closed")
-                .font(.system(size: 15.5, weight: isSelected ? .bold : .medium))
-                .frame(width: 18, height: 18)
+            Image(systemName: "character.book.closed.fill")
         }
     }
 
@@ -155,6 +141,13 @@ struct RootTabView: View {
         case .notes: return "Ghi chú"
         case .vocabulary: return "Từ vựng"
         }
+    }
+}
+
+private struct TabItemPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1.0)
     }
 }
 
