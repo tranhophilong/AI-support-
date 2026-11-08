@@ -36,6 +36,7 @@ class MessageModel {
     var createdAt: Date = Date()
     var imageData: Data?
     var sceneDescriptionJSON: String?
+    var pronunciationDataJSON: String?
 
     var conversation: ConversationModel?
 
@@ -59,7 +60,8 @@ class MessageModel {
         followUpQuestion: String? = nil,
         suggestedReplies: [String]? = nil,
         imageData: Data? = nil,
-        sceneDescription: AISceneDescriptionResponse? = nil
+        sceneDescription: AISceneDescriptionResponse? = nil,
+        pronunciationDataJSON: String? = nil
     ) {
         self.text = text
         self.isUser = isUser
@@ -71,10 +73,21 @@ class MessageModel {
         self.followUpQuestion = followUpQuestion
         self.suggestedReplies = suggestedReplies
         self.imageData = imageData
+        self.pronunciationDataJSON = pronunciationDataJSON
         if let sceneDescription,
            let data = try? JSONEncoder().encode(sceneDescription),
            let json = String(data: data, encoding: .utf8) {
             self.sceneDescriptionJSON = json
+        }
+    }
+
+    var decodedPronunciationAssessment: PronunciationAssessmentResult? {
+        get {
+            guard let pronunciationDataJSON else { return nil }
+            return PronunciationAssessmentResult.fromJSONString(pronunciationDataJSON)
+        }
+        set {
+            pronunciationDataJSON = newValue?.toJSONString()
         }
     }
 

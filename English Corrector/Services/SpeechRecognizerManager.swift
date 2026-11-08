@@ -8,10 +8,33 @@ import Combine
 import Speech
 import AVFoundation
 
+public struct AcousticSpeechSegment: Sendable, Equatable {
+    public let substring: String
+    public let confidence: Float
+    public let timestamp: TimeInterval
+    public let duration: TimeInterval
+    public let alternativeSubstrings: [String]
+
+    public init(
+        substring: String,
+        confidence: Float,
+        timestamp: TimeInterval = 0,
+        duration: TimeInterval = 0,
+        alternativeSubstrings: [String] = []
+    ) {
+        self.substring = substring
+        self.confidence = confidence
+        self.timestamp = timestamp
+        self.duration = duration
+        self.alternativeSubstrings = alternativeSubstrings
+    }
+}
+
 @MainActor
 final class SpeechRecognizerManager: ObservableObject {
 
     @Published private(set) var isRecording = false
+    @Published private(set) var latestSegments: [AcousticSpeechSegment] = []
 
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var audioEngine: AVAudioEngine?
@@ -119,6 +142,17 @@ final class SpeechRecognizerManager: ObservableObject {
                     guard let self, self.isRecording, self.activeSessionID == sessionID else { return }
 
                     if let result {
+                        let segs = result.bestTranscription.segments.map { seg in
+                            AcousticSpeechSegment(
+                                substring: seg.substring,
+                                confidence: seg.confidence,
+                                timestamp: seg.timestamp,
+                                duration: seg.duration,
+                                alternativeSubstrings: seg.alternativeSubstrings
+                            )
+                        }
+                        self.latestSegments = segs
+
                         let spoken = result.bestTranscription.formattedString
                             .trimmingCharacters(in: .whitespacesAndNewlines)
 

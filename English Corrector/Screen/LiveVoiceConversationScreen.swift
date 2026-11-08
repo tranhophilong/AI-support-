@@ -192,6 +192,7 @@ struct LiveVoiceConversationScreen: View {
     @AppStorage("selectedAIModel") private var selectedAIModelRawValue = AIModelOption.groqGPTOSS20B.rawValue
     @AppStorage("voiceHandsFreeEnabled") private var isHandsFreeMode = true
     @AppStorage("voiceSubtitleMode") private var subtitleModeRawValue = VoiceSubtitleMode.bilingual.rawValue
+    @AppStorage("voice_ai_pronunciation_mode_enabled") private var isPronunciationModeEnabled = true
 
     @State private var speechSpeed: VoiceSpeechSpeed = .normal
     @State private var liveTranscript = ""
@@ -208,6 +209,10 @@ struct LiveVoiceConversationScreen: View {
     @State private var toastMessage = ""
     @State private var showToast = false
     @State private var showVoiceStudio = false
+
+    @State private var selectedAssessmentForDrill: PronunciationAssessmentResult?
+    @State private var selectedWordForDrill: WordPronunciationScore?
+    @State private var isDrillSheetPresented = false
 
     private var selectedAIModel: AIModelOption {
         AIModelOption(rawValue: selectedAIModelRawValue) ?? .groqGPTOSS20B
@@ -395,6 +400,14 @@ struct LiveVoiceConversationScreen: View {
         .sheet(isPresented: $showVoiceStudio) {
             AIVoiceStudioSheet()
         }
+        .sheet(isPresented: $isDrillSheetPresented) {
+            if let result = selectedAssessmentForDrill {
+                PronunciationDrillSheet(
+                    result: result,
+                    selectedWord: selectedWordForDrill
+                )
+            }
+        }
     }
 
     // MARK: - Top Header Bar
@@ -502,6 +515,26 @@ struct LiveVoiceConversationScreen: View {
                             .strokeBorder(AppTheme.Surface.border, lineWidth: 1)
                     }
             }
+
+            // Pronunciation Assessment Mode Toggle
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isPronunciationModeEnabled.toggle()
+                }
+                showStatusToast(isPronunciationModeEnabled ? "Đã bật phân tích phát âm" : "Đã tắt phân tích phát âm")
+            } label: {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isPronunciationModeEnabled ? AppTheme.Primary.p500 : AppTheme.Neutral.n400)
+                    .frame(width: 34, height: 34)
+                    .background(isPronunciationModeEnabled ? AppTheme.Primary.p50 : AppTheme.Surface.card)
+                    .clipShape(Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(isPronunciationModeEnabled ? AppTheme.Primary.p300 : AppTheme.Surface.border, lineWidth: 1)
+                    }
+            }
+            .accessibilityLabel("Chế độ sửa phát âm")
 
             // Close Call Button
             Button {
@@ -673,9 +706,73 @@ struct LiveVoiceConversationScreen: View {
                 .buttonStyle(.plain)
             }
 
-            Text("\"\(userMsg.text)\"")
-                .font(.subheadline)
-                .foregroundStyle(AppTheme.Neutral.n700)
+            if isPronunciationModeEnabled {
+                if let assessment = userMsg.decodedPronunciationAssessment {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            HStack(spacing: 4) {
+                                Image(systemName: assessment.overallLevel.iconName)
+                                Text("\(assessment.overallScore)% • \(assessment.overallLevel.title)")
+                                    .font(.caption2.bold())
+                            }
+                            .foregroundStyle(assessment.overallLevel.color)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(assessment.overallLevel.badgeBackgroundColor)
+                            .clipShape(Capsule())
+
+                            Spacer()
+
+                            Button {
+                                openPronunciationDrill(result: assessment, word: nil)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "waveform.badge.magnifyingglass")
+                                    Text("Luyện phát âm")
+                                }
+                                .font(.caption2.bold())
+                                .foregroundStyle(AppTheme.Primary.p600)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        // Color-coded clickable words
+                        WordPickerFlowLayout(spacing: 6, lineSpacing: 6) {
+                            ForEach(assessment.words) { item in
+                                Button {
+                                    openPronunciationDrill(result: assessment, word: item)
+                                } label: {
+                                    Text(item.word)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(item.level.color)
+                                        .underline(item.level != .excellent, color: item.level.color.opacity(0.8))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        Text("\"\(userMsg.text)\"")
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Neutral.n700)
+
+                        Spacer()
+
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.65)
+                            Text("Chấm phát âm...")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Neutral.n400)
+                        }
+                    }
+                }
+            } else {
+                Text("\"\(userMsg.text)\"")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.Neutral.n700)
+            }
 
             if let aiMsg, aiMsg.createdAt >= userMsg.createdAt {
                 let bestNatural = (aiMsg.natural ?? aiMsg.fixed ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1236,6 +1333,21 @@ struct LiveVoiceConversationScreen: View {
         context.insert(userMessage)
         try? context.save()
 
+        // 1.1 Parallel Pronunciation Assessment
+        if isPronunciationModeEnabled {
+            let acousticSegments = speechRecognizer.latestSegments
+            Task {
+                let assessment = await PronunciationAssessmentService.shared.assessPronunciation(
+                    sentence: userText,
+                    acousticSegments: acousticSegments
+                )
+                await MainActor.run {
+                    userMessage.decodedPronunciationAssessment = assessment
+                    try? context.save()
+                }
+            }
+        }
+
         // 2. Prepare recent history
         let recentHistory: [String] = conversation.messages
             .filter { $0.id != userMessage.id }
@@ -1404,6 +1516,12 @@ struct LiveVoiceConversationScreen: View {
             speechRecognizer.stopRecording()
         }
         tts.stop()
+    }
+
+    private func openPronunciationDrill(result: PronunciationAssessmentResult, word: WordPronunciationScore?) {
+        selectedAssessmentForDrill = result
+        selectedWordForDrill = word
+        isDrillSheetPresented = true
     }
 }
 
